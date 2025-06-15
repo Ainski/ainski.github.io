@@ -1,13 +1,13 @@
 ---
 layout: post
-title: "Hello python year!"
+title: "问世界好哉？"
 date:   2025-06-15
 tags: [helloword]
 comments: true
 author: Ainski
 ---
 
-## 问世界好哉？
+### 问世界好哉？
 
 这是我的第一个博客页面！关于自己的一些简单介绍，请移步`About`。
 
@@ -16,7 +16,7 @@ author: Ainski
 
 <!-- more -->
 
-## 致谢
+### 致谢
 
 感谢 [arnold](https://github.com/arnold117/)提供的原始模板，在其上进行博客的Post。
 
