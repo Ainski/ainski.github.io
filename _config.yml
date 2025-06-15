@@ -12,9 +12,9 @@ description: "Ainski's Code and Blog"
 #
 
 # URL of your avatar or profile pic (you could use your GitHub profile pic)
-avatar: https://github.com/Ainski/ainski.github.io/blob/main/images/avatar.jpg
+avatar: https://github.com/Ainski/ainski.github.io/raw/main/images/avatar.jpg
 # 你的favicon（出现在浏览器tab上）图片URL，建议使用较小(64px × 64px)的图片
-favicon: https://github.com/Ainski/ainski.github.io/blob/main/images/favicon.ico
+favicon: https://github.com/Ainski/ainski.github.io/raw/main/images/favicon.ico
 
 # Tabs in header. There are 'Blog', 'About', 'Archive', 'Tags'
 # and URL Link(e.g. 'Theme' tab below) tabs. If you don't need one, just delete
