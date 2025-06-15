@@ -2,7 +2,7 @@
 layout: post
 title: "问世界好哉？"
 date:   2025-06-15
-tags: [helloword]
+tags: [helloworld]
 comments: true
 author: Ainski
 ---
