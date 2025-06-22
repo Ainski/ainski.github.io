@@ -7,8 +7,6 @@ comments: true
 author: Ainski
 ---
 
-### 问世界好哉？
-
 这是我的第一个博客页面！关于自己的一些简单介绍，请移步`About`。
 
 
