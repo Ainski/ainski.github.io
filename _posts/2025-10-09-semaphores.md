@@ -11,7 +11,19 @@ author: Ainski
 ### 提出
 dijistra哲学家问题
 ### 信号量的物理结构
-#### 1. 整形信号量
+#### 1. 整型信号量
+``` c
+wait(S){
+    while(S<=0);
+    S--;
+
+}
+Signal(S){
+    S++;
+}
+```
+S 表示某一种资源数目的总数
+#### 2. 记录型信号量
 ```c
 typedef struct{
     int value;
@@ -26,3 +38,4 @@ signal(semaphore *S){
     S->value++;
     if(S->value<=0) wakeup(S->list);
 }
+```
