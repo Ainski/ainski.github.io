@@ -27,13 +27,13 @@ echo "Ruby version $RUBY_VERSION is installed."
 # Check if Bundler is installed
 if ! command -v bundle &> /dev/null; then
     echo "Bundler is not installed. Installing Bundler..."
-    gem install bundler
+    sudo gem install bundler
 fi
 
 # Check if Jekyll is installed
 if ! command -v jekyll &> /dev/null; then
     echo "Jekyll is not installed. Installing Jekyll..."
-    gem install jekyll
+    sudo gem install jekyll
 fi
 
 echo "Bundler and Jekyll are installed."
