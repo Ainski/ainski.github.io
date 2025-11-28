@@ -1,8 +1,8 @@
 ---
 layout: post
 title: "MyhillNerode定理"
-date: 2025-11-19
-tags: [学校课程复习,计算机网络]
+date: 2025-11-24
+tags: [学校课程复习,形式语言与自动机]
 comments: true
 author: Ainski
 ---
