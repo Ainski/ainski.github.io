@@ -206,41 +206,16 @@ table {
   width: 100%;
   border: 1px solid $table-border-color;
   border-collapse: collapse;
-  display: block;
-  overflow-x: auto;  // Allow horizontal scrolling on small screens
-
-  // Improve table header styling
-  th {
-    background-color: $oc-gray-1;
-    font-weight: bold;
-    padding: .5rem;
-    text-align: left;
-    border: 1px solid $table-border-color;
-  }
-
-  // Improve table cell styling
-  td {
-    padding: .5rem;
-    border: 1px solid $table-border-color;
-    vertical-align: top;
-  }
-
-  // Zebra striping for rows
-  tbody tr:nth-child(odd) {
-    background-color: $table-background-color;
-  }
-
-  tbody tr:hover {
-    background-color: $oc-gray-1;
-  }
 }
 
-// Responsive table wrapper
-.table-wrapper {
-  overflow-x: auto;
-  margin: 1rem 0;
-  border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+td, th {
+  padding: .25rem .5rem;
+  border: 1px solid $table-border-color;
+}
+
+tbody tr:nth-child(odd) td,
+tbody tr:nth-child(odd) th {
+  background-color: $table-background-color;
 }
 
 // Blockquote
@@ -548,7 +523,7 @@ nav {
   position: fixed;
   z-index: 4;
   padding: 60px 20px 0 20px;
-
+  
   &:before{
     content:"目录";
     margin: 0 0 1em 1em;
@@ -695,7 +670,7 @@ nav {
   clear:both;
   width:100%;
   bottom:0;
-
+  
   @include mobile {
     display: none;
   }
@@ -704,7 +679,7 @@ nav {
 
 .wrapper-footer-mobile {
   display: none;
-
+  
   @include mobile {
     display: block;
     width: 100%;
@@ -738,7 +713,7 @@ footer {
       height: 20px;
       width: 20px;
       fill: $base-lighten-color;
-
+      
       &:hover {
         fill: $link-lighten-color;
       }

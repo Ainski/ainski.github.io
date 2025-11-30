@@ -3,10 +3,10 @@ layout: default
 ---
 
 <article class="posts">
-
+  
   <h1>{{ page.title }}</h1>
 
-  <div class="meta">
+  <div clsss="meta">
     <span class="date">
       {{ page.date | date: "%Y-%m-%d" }}
     </span>
@@ -22,13 +22,10 @@ layout: default
     </ul>
   </div>
 
-
+  
 
   <div class="entry">
-    <!-- Wrap content in a container that allows for table processing -->
-    <div class="content-wrapper">
-      {{ content }}
-    </div>
+    {{ content }}
   </div>
 
   {% include disqus.html %}
@@ -51,19 +48,3 @@ layout: default
     </span>
   {% endif %}
 </div>
-
-<script>
-  // Automatically wrap all tables in responsive containers after page loads
-  document.addEventListener('DOMContentLoaded', function() {
-    const tables = document.querySelectorAll('table');
-    tables.forEach(function(table) {
-      // Check if table is already wrapped
-      if (table.parentElement.className !== 'table-wrapper') {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'table-wrapper';
-        table.parentNode.insertBefore(wrapper, table);
-        wrapper.appendChild(table);
-      }
-    });
-  });
-</script>

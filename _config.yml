@@ -71,7 +71,7 @@ gitalk:
   owner: ainski
 
 # Enter your Google Analytics web tracking code (e.g. UA-2110908-2) to activate tracking
-# google_analytics:
+# google_analytics: 
 
 # Your website URL (e.g. http://barryclark.github.io or http://www.barryclark.co)
 # Used for Sitemap.xml and your RSS feed
@@ -81,7 +81,7 @@ url: https://ainski.github.io
 # (http://yourusername.github.io/repository-name)
 # and NOT your User repository (http://yourusername.github.io)
 # then add in the baseurl here, like this: "/repository-name"
-# baseurl:
+# baseurl: 
 
 #
 # !! You don't need to change any of the configuration flags below !!
@@ -97,14 +97,6 @@ version: v1.2.0
 kramdown:
   # Use GitHub flavored markdown, including triple backtick fenced code blocks
   input: GFM
-  # Enable GitHub Flavored Markdown extensions including tables
-  gfm_quirks: no-empty-links,tagfilter
-  # Enable table of contents
-  toc_levels: 1..6
-  # Parse block-level HTML as text
-  parse_block_html: false
-  # Enable GitHub Flavored Markdown
-  enable_coderay: false
   # Jekyll 3 and GitHub Pages now only support rouge for syntax highlighting
   syntax_highlighter: rouge
   syntax_highlighter_opts:
@@ -120,7 +112,6 @@ plugins:
   - jekyll-sitemap # Create a sitemap using the official Jekyll sitemap gem
   - jekyll-feed # Create an Atom feed using the official Jekyll feed gem
   - jekyll-paginate
-  - jemoji # For GitHub Flavored Markdown emoji support
 
 # Exclude these files from your production _site
 exclude:
