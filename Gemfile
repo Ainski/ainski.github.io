@@ -2,13 +2,13 @@
 
 source "https://rubygems.org"
 
-# Jekyll version
-gem "jekyll", "~> 4.0"
+# Use the github-pages gem for full compatibility with GitHub Pages
+gem "github-pages", group: :jekyll_plugins
 
 # Jekyll plugins
 gem "jekyll-sitemap"
 gem "jekyll-feed"
 gem "jekyll-paginate"
 
-# Additional dependencies
+# Additional dependencies for GFM
 gem "kramdown-parser-gfm"

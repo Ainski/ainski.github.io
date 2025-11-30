@@ -33,7 +33,7 @@ layout: default
 	exclude: ['Welcome']
   })
 </script>
- 
+
 {% if site.posts.size == 0 %}
   <h2>No post found</h2>
 {% endif %}
@@ -46,7 +46,7 @@ layout: default
         <a href="{{ site.baseurl }}{{ post.url }}">{{ post.title }}</a>
       </h1>
 
-      <div clsss="meta">
+      <div class="meta">
         <span class="date">
           {{ post.date | date: "%Y-%m-%d" }}
         </span>

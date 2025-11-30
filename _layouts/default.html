@@ -25,6 +25,43 @@
   </script>
   {% endif %}
 
+  <!-- Load MathJax after content to ensure proper rendering of LaTeX formulas -->
+  {% if page.mathjax != false %}
+  <script>
+    if (!window.MathJax) {
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
+          processEscapes: true,
+          processEnvironments: true
+        },
+        options: {
+          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+        }
+      };
+    }
+  </script>
+  {% endif %}
+
+  <!-- Automatically wrap all tables in responsive containers after page loads -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const tables = document.querySelectorAll('table');
+      tables.forEach(function(table) {
+        // Check if table is already wrapped
+        if (table.parentElement.className !== 'table-wrapper') {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'table-wrapper';
+          if (table.parentNode) {
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(table);
+          }
+        }
+      });
+    });
+  </script>
+
   <div class="wrapper-footer-mobile">
     <footer class="footer">
       {% include footer.html %}
