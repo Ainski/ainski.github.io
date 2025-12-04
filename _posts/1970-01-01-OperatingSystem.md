@@ -447,5 +447,342 @@ setPri会在如下情况会被重算：
 - 整数秒，重算当前进程优先数
 - 系统调用末尾，重算现运行进程优先数。 
 
+系统调用的末尾重算优先级的目的在于，刷掉核心态下的优先级，回复计算获得的优先数；现运行进程优先级下降，设置Runrun标志位，要求进行进程调度。
 
 ## 5.3 进程的创建和中止
+### 5.3.1 进程创建的基本流程
+-  获得空闲的proc
+-  复制父进程的额p_size,p_stat,p_flag,p_uid,p_nice,p_textp
+   -  p_textp 代表父子共用了一个代码段
+-  设置： p_pri=0;p_time=0;p_pid=新标识符;p_ppid=当前进程（父进程）
+   -  p_pri 为0让他更快的进入cpu执行创建的过程。
+- 相关计数器的值加一
+  - x_count x_ccount
+  - 相关资源占用值（file引用属数，ucdir->icount）
+- 按照p_size的值为子进程生成一个进程图像。
+  - 核心栈一致，用户栈的函数都一样。父子进程的相对虚实地址映射表式一样的。
+  - 但是真正的页表不一样，只有代码段的是一样的，还有系统核心栈的值是一样的。0x201号页表，只有最后一项不一样。父子进程的x_daddr的地址是一样的。也就是说，新进程的逻辑地址和父进程的逻辑地址是一样的。但是物理地址是不一样的。 
+
+#### 如何让父子进程完成不同的工作？
+我们遇到了这样一个问题，在系统所有就绪队列的进程当中，大家的核心栈的栈顶都是一个swtch栈帧，然而，新创建的进程由于直接copy了正在运行的父进程的图像，这就导致它在就绪队列当中，但是它的栈顶是一个NewProc栈帧。
+```c++
+int ProcessManager::NewProc()
+{
+	//Diagnose::Write("Start NewProc()\n");
+	Process* child = 0;
+	for (int i = 0; i < ProcessManager::NPROC; i++ )
+	{
+		if ( process[i].p_stat == Process::SNULL )
+		{
+			child = &process[i];
+			break;
+		}
+	}
+	if ( !child ) 
+	{
+		Utility::Panic("No Proc Entry!");
+	}
+
+	User& u = Kernel::Instance().GetUser();
+	Process* current = (Process*)u.u_procp;
+	//Newproc函数被分成两部分，clone仅复制process结构内的数据
+	current->Clone(*child);
+
+	/* 这里必须先要调用SaveU()保存现场到u区，因为有些进程并不一定
+	设置过 */
+	SaveU(u.u_rsav);
+
+	/* 将父进程的用户态页表指针m_UserPageTableArray备份至pgTable */
+	PageTable* pgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+	u.u_MemoryDescriptor.Initialize();
+	/* 父进程的相对地址映照表拷贝给子进程，共两张页表的大小 */
+	if ( NULL != pgTable )
+	{
+		u.u_MemoryDescriptor.Initialize();
+		Utility::MemCopy((unsigned long)pgTable, (unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray, sizeof(PageTable) * MemoryDescriptor::USER_SPACE_PAGE_TABLE_CNT);
+	}
+
+	//将先运行进程的u区的u_procp指向new process
+	//这样可以在被复制的时候可以直接复制u_procp的
+	//地址，在内存不够时，是无法将u区映射到用户区，
+	//修改u_procp的地址的
+	u.u_procp = child;
+
+	UserPageManager& userPageManager = Kernel::Instance().GetUserPageManager();
+
+	unsigned long srcAddress = current->p_addr;
+	unsigned long desAddress = userPageManager.AllocMemory(current->p_size);
+	//Diagnose::Write("srcAddress %x\n", srcAddress);
+	//Diagnose::Write("desAddress %x\n", desAddress);
+	if ( desAddress == 0 ) /* 内存不够，需要swap */
+	{
+		current->p_stat = Process::SIDL;
+		/* 子进程p_addr指向父进程图像，因为子进程换出至交换区需要以父进程图像为蓝本 */
+		child->p_addr = current->p_addr;
+		SaveU(u.u_ssav);
+		this->XSwap(child, false, 0);
+		child->p_flag |= Process::SSWAP;
+		current->p_stat = Process::SRUN;
+	}
+	else
+	{
+		int n = current->p_size;
+		child->p_addr = desAddress;
+		while (n--)
+		{
+			Utility::CopySeg(srcAddress++, desAddress++);
+		}
+	}
+	u.u_procp = current;
+	/* 
+	 * 拷贝进程图像期间，父进程的m_UserPageTableArray指向子进程的相对地址映照表；
+	 * 复制完成后才能恢复为先前备份的pgTable。
+	 */
+	u.u_MemoryDescriptor.m_UserPageTableArray = pgTable;
+	//Diagnose::Write("End NewProc()\n");
+	return 0;
+}
+
+```
+父进程，从这里返回的值为0，子进程，利用Swtch函数的返回值1。这样，父子进程就进入了不同的状态。父子进程上返回地址都在newproc当中，但是他们带回来的值是不一样的。
+
+#### fork系统调用
+```c++
+/*	2 = fork	count = 0	*/
+int SystemCall::Sys_Fork()
+{
+	ProcessManager& procMgr = Kernel::Instance().GetProcessManager();
+	procMgr.Fork();
+
+	return 0;	/* GCC likes it ! */
+}
+void ProcessManager::Fork()
+{
+	User& u = Kernel::Instance().GetUser();
+	Process* child = NULL;;
+
+	/* 寻找空闲的process项，作为子进程的进程控制块 */
+	for ( int i = 0; i < ProcessManager::NPROC; i++ )
+	{
+		if ( this->process[i].p_stat == Process::SNULL )
+		{
+			child = &this->process[i];
+			break;
+		}
+	}
+	if ( child == NULL )
+	{
+		/* 没有空闲process表项，返回 */
+		u.u_error = User::EAGAIN;
+		return;
+	}
+
+	if ( this->NewProc() )	/* 子进程返回1，父进程返回0 */
+	{
+		/* 子进程fork()系统调用返回0 */
+		u.u_ar0[User::EAX] = 0;
+		u.u_cstime = 0;
+		u.u_stime = 0;
+		u.u_cutime = 0;
+		u.u_utime = 0;
+	}
+	else
+	{
+		/* 父进程进程fork()系统调用返回子进程PID */
+		u.u_ar0[User::EAX] = child->p_pid;
+	}
+
+	return;
+}
+```
+应当注意的是，在一个进程刚刚创建的时候p_pri=0。然而，在fork返回之后，由于系统调用结束会产生一个setpri的pri值重算。这样当子进程被重新加入就绪队列之后，父子进程上台机会是相等的。
+### 5.3.2 进程的终止
+父进程无法设置好正确的时钟去等待子进程的结束时间。因此，父进程会等到子进程活过来再把自己杀掉。
+```c++
+int wait(int* status)	/* 获取子进程返回的Return Code */
+{
+	int res;
+	__asm__ __volatile__ ( "int $0x80":"=a"(res):"a"(7),"b"(status));
+	if ( res >= 0 )
+		return res;
+	return -1;
+}
+```
+#### 进程终止状态
+```c++
+int exit(int status)	/* 子进程返回给父进程的Return Code */
+{
+	int res;
+	__asm__ __volatile__ ( "int $0x80":"=a"(res):"a"(1),"b"(status));
+	if ( res >= 0 )
+		return res;
+	return -1;
+}
+```
+
+```c++
+void Process::Exit()
+{
+	int i;
+	User& u = Kernel::Instance().GetUser();
+	ProcessManager& procMgr = Kernel::Instance().GetProcessManager();
+	OpenFileTable& fileTable = *Kernel::Instance().GetFileManager().m_OpenFileTable;
+	InodeTable& inodeTable = *Kernel::Instance().GetFileManager().m_InodeTable;
+
+	Diagnose::Write("Process %d is exiting\n",u.u_procp->p_pid);
+	/* Reset Tracing flag */
+	u.u_procp->p_flag &= (~Process::STRC);
+
+	/* 清除进程的信号处理函数，设置为1表示不对该信号作任何处理 */
+	for ( i = 0; i < User::NSIG; i++ )
+	{
+		u.u_signal[i] = 1;
+	}
+
+	/* 关闭进程打开文件 */
+	for ( i = 0; i < OpenFiles::NOFILES; i++ )
+	{
+		File* pFile = NULL;
+		if ( (pFile = u.u_ofiles.GetF(i)) != NULL )
+		{
+			fileTable.CloseF(pFile);
+			u.u_ofiles.SetF(i, NULL);
+		}
+	}
+	/*  访问不存在的fd会产生error code，清除u.u_error避免影响后续程序执行流程 */
+	u.u_error = User::NOERROR;
+
+	/* 递减当前目录的引用计数 */
+	inodeTable.IPut(u.u_cdir);
+
+	/* 释放该进程对共享正文段的引用 */
+	if ( u.u_procp->p_textp != NULL )
+	{
+		u.u_procp->p_textp->XFree();
+		u.u_procp->p_textp = NULL;
+	}
+
+	/* 将u区写入交换区，等待父进程做善后处理 */
+	SwapperManager& swapperMgr = Kernel::Instance().GetSwapperManager();
+	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
+	/* u区的大小不会超过512字节，所以只写入ppda区的前512字节，已囊括u结构的全部信息 */
+	int blkno = swapperMgr.AllocSwap(BufferManager::BUFFER_SIZE);
+	if ( NULL == blkno )
+	{
+		Utility::Panic("Out of Swapper Space");
+	}
+	Buf* pBuf = bufMgr.GetBlk(DeviceManager::ROOTDEV, blkno);
+	Utility::DWordCopy((int *)&u, (int *)pBuf->b_addr, BufferManager::BUFFER_SIZE / sizeof(int));
+	bufMgr.Bwrite(pBuf);
+
+	/* 释放内存资源 */
+	u.u_MemoryDescriptor.Release();
+	Process* current = u.u_procp;
+	UserPageManager& userPageMgr = Kernel::Instance().GetUserPageManager();
+	userPageMgr.FreeMemory(current->p_size, current->p_addr);
+	current->p_addr = blkno;
+	current->p_stat = Process::SZOMB;
+
+	/* 唤醒父进程进行善后处理 */
+	for ( i = 0; i < ProcessManager::NPROC; i++ )
+	{
+		if ( procMgr.process[i].p_pid == current->p_ppid )
+		{
+			procMgr.WakeUpAll((unsigned long)&procMgr.process[i]);
+			break;
+		}
+	}
+	/* 没找到父进程 */
+	if ( ProcessManager::NPROC == i )
+	{
+		current->p_ppid = 1;
+		procMgr.WakeUpAll((unsigned long)&procMgr.process[1]);
+	}
+
+	/* 将自己的子进程传给自己的父进程 */
+	for ( i = 0; i < ProcessManager::NPROC; i++ )
+	{
+		if ( current->p_pid == procMgr.process[i].p_ppid )
+		{
+			Diagnose::Write("My:%d 's child %d passed to 1#process",current->p_pid,procMgr.process[i].p_pid);
+			procMgr.process[i].p_ppid = 1;
+			if ( procMgr.process[i].p_stat == Process::SSTOP )
+			{
+				procMgr.process[i].SetRun();
+			}
+		}
+	}
+
+	procMgr.Swtch();
+}
+```
+
+#### wait 函数
+```c++
+
+void ProcessManager::Wait()
+{
+	int i;
+	bool hasChild = false;
+	User& u = Kernel::Instance().GetUser();
+	SwapperManager& swapperMgr = Kernel::Instance().GetSwapperManager();
+	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
+	
+	Diagnose::Write("Process %d finding dead son. They are ",u.u_procp->p_pid);
+	while(true)
+	{
+		for ( i = 0; i < NPROC; i++ )
+		{
+			if ( u.u_procp->p_pid == process[i].p_ppid )
+			{
+				Diagnose::Write("Process %d (Status:%d)  ",process[i].p_pid,process[i].p_stat);
+				hasChild = true;
+				/* 睡眠等待直至子进程结束 */
+				if( Process::SZOMB == process[i].p_stat )
+				{
+					/* wait()系统调用返回子进程的pid */
+					u.u_ar0[User::EAX] = process[i].p_pid;
+
+					process[i].p_stat = Process::SNULL;
+					process[i].p_pid = 0;
+					process[i].p_ppid = -1;
+					process[i].p_sig = 0;
+					process[i].p_flag = 0;
+
+					/* 读入swapper中子进程u结构副本 */
+					Buf* pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, process[i].p_addr);
+					swapperMgr.FreeSwap(BufferManager::BUFFER_SIZE, process[i].p_addr);
+					User* pUser = (User *)pBuf->b_addr;
+
+					/* 把子进程的时间加到父进程上 */
+					u.u_cstime += pUser->u_cstime +	pUser->u_stime;
+					u.u_cutime += pUser->u_cutime + pUser->u_utime;
+
+					int* pInt = (int *)u.u_arg[0];
+					/* 获取子进程exit(int status)的返回值 */
+					*pInt = pUser->u_arg[0];
+
+					/* 如果此处没有Brelse()系统会发生什么-_- */
+					bufMgr.Brelse(pBuf);
+					Diagnose::Write("end wait\n");
+					return;
+				}
+			}
+		}
+		if (true == hasChild)
+		{
+			/* 睡眠等待直至子进程结束 */
+			Diagnose::Write("wait until child process Exit! ");
+			u.u_procp->Sleep((unsigned long)u.u_procp, ProcessManager::PWAIT);
+			Diagnose::Write("end sleep\n");
+			continue;	/* 回到外层while(true)循环 */
+		}
+		else
+		{
+			/* 不存在需要等待结束的子进程，设置出错码，wait()返回 */
+			u.u_error = User::ECHILD;
+			break;	/* Get out of while loop */
+		}
+	}
+}
+```

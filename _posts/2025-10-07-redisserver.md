@@ -13,7 +13,7 @@ author: Ainski
 - redis-server
     1. 启动redis服务
     ```shell
-    nohup redis-server &
+    nohup redis-server ~/redis.conf &
     或者
     redis-server /path/to/redis.conf
     ```
