@@ -71,7 +71,7 @@ gitalk:
   owner: ainski
 
 # Enter your Google Analytics web tracking code (e.g. UA-2110908-2) to activate tracking
-# google_analytics: 
+# google_analytics:
 
 # Your website URL (e.g. http://barryclark.github.io or http://www.barryclark.co)
 # Used for Sitemap.xml and your RSS feed
@@ -81,7 +81,7 @@ url: https://ainski.github.io
 # (http://yourusername.github.io/repository-name)
 # and NOT your User repository (http://yourusername.github.io)
 # then add in the baseurl here, like this: "/repository-name"
-# baseurl: 
+# baseurl:
 
 #
 # !! You don't need to change any of the configuration flags below !!
@@ -97,11 +97,17 @@ version: v1.2.0
 kramdown:
   # Use GitHub flavored markdown, including triple backtick fenced code blocks
   input: GFM
+  # Enable parse block html and SmartyPants
+  parse_block_html: true
+  enable_coderay: false
   # Jekyll 3 and GitHub Pages now only support rouge for syntax highlighting
   syntax_highlighter: rouge
   syntax_highlighter_opts:
     # Use existing pygments syntax highlighting css
     css_class: 'highlight'
+  # Table options for better table handling
+  gfm_emoji: true
+  gfm_table: true
 
 # Set the Sass partials directory, as we're using @imports
 sass:
