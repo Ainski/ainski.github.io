@@ -523,7 +523,7 @@ nav {
   position: fixed;
   z-index: 4;
   padding: 60px 20px 0 20px;
-  
+
   &:before{
     content:"目录";
     margin: 0 0 1em 1em;
@@ -541,6 +541,95 @@ nav {
   @include mobile{
     display:none;
   }
+}
+
+/* 目录切换按钮 - 只在博客页面显示 */
+.post-page .toc-toggle-btn {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  background: $background-color;
+  border: 1px solid $divider-color;
+  border-radius: 3px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+
+  &:hover {
+    background: $base-color;
+    color: white;
+  }
+}
+
+.post-page .toc-toggle-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* 侧边栏切换按钮 - 只在博客页面显示 */
+.post-page .sidebar-toggle-btn {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  background: $background-color;
+  border: 1px solid $divider-color;
+  border-radius: 3px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+
+  &:hover {
+    background: $base-color;
+    color: white;
+  }
+}
+
+.post-page .sidebar-toggle-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* 当侧边栏隐藏时，主内容占满屏幕 - 只在博客页面有效 */
+.post-page.sidebar-hidden .wrapper-content,
+.post-page.toc-hidden .wrapper-content {
+  float: none !important;
+  width: 100% !important;
+  margin-left: 0 !important;
+}
+
+/* 隐藏侧边栏 */
+.post-page.sidebar-hidden .wrapper-sidebar,
+.post-page.toc-hidden .wrapper-sidebar {
+  display: none !important;
+}
+
+/* 为 withtoc 类元素在目录显示时预留空间 */
+.post-page.toc-visible .withtoc {
+  padding-left: 260px; /* 为目录留出空间 */
+}
+
+/* 为目录元素预留空间 - 当有目录时 */
+.post-page.with-toc .wrapper-content {
+  margin-left: 240px;  /* 为目录宽度预留空间 */
+  width: calc(100% - 240px);  /* 减去目录宽度 */
+}
+
+/* 当侧边栏隐藏时，主要内容占满屏幕 */
+.post-page.sidebar-hidden,
+.post-page.toc-hidden {
+  overflow-x: hidden; /* 防止出现不必要的水平滚动条 */
+}
+
+/* 确保主要内容区域在侧边栏隐藏时获得正确的宽度 */
+body.sidebar-hidden .wrapper-content,
+body.toc-hidden .wrapper-content {
+  width: 100% !important;
+  float: none !important;
+  margin-left: 0 !important;
 }
 
 @media screen and (max-width:2200px) and (min-width:1200px){
@@ -670,7 +759,7 @@ nav {
   clear:both;
   width:100%;
   bottom:0;
-  
+
   @include mobile {
     display: none;
   }
@@ -679,7 +768,7 @@ nav {
 
 .wrapper-footer-mobile {
   display: none;
-  
+
   @include mobile {
     display: block;
     width: 100%;
@@ -713,7 +802,7 @@ footer {
       height: 20px;
       width: 20px;
       fill: $base-lighten-color;
-      
+
       &:hover {
         fill: $link-lighten-color;
       }

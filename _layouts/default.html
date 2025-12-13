@@ -1,14 +1,8 @@
 <!DOCTYPE html>
 <html>
   {% include head.html %}
-  <body>
+  <body class="{% if page.layout == 'post' %}post-page{% endif %}">
     {% include nav.html %}
-
-    {% if page.toc==true %}
-      <aside class="toc">
-        {% include toc.html html=content h_max=3%}
-      </aside>
-    {% endif %}
 
     <div id="main" role="main" class="wrapper-content">
       <div class="container">
@@ -29,6 +23,5 @@
     <footer class="footer">
       {% include footer.html %}
     </footer>
-
-
+  </div>
 </html>

@@ -2,8 +2,18 @@
 layout: default
 ---
 
+{% if page.toc == true %}
+  <!-- 目录切换按钮 -->
+  <div class="toc-toggle-btn">
+    <span class="toc-toggle-icon">目录</span>
+  </div>
+  <aside class="toc">
+    {% include toc.html html=content h_max=3%}
+  </aside>
+{% endif %}
+
 <article class="posts">
-  
+
   <h1>{{ page.title }}</h1>
 
   <div clsss="meta">
@@ -22,7 +32,7 @@ layout: default
     </ul>
   </div>
 
-  
+
 
   <div class="entry">
     {{ content }}
@@ -48,3 +58,79 @@ layout: default
     </span>
   {% endif %}
 </div>
+
+<script>
+  // 侧边栏和目录控制（仅在博客文章页面）
+  document.addEventListener('DOMContentLoaded', function() {
+    {% if page.toc == true %}
+    // 有目录的情况：控制目录和侧边栏一起显示/隐藏
+    const toc = document.querySelector('.toc');
+    const tocToggleBtn = document.querySelector('.toc-toggle-btn');
+    const wrapperSidebar = document.querySelector('.wrapper-sidebar');
+    const contentWrapper = document.querySelector('.wrapper-content');
+    const body = document.body;
+
+    // 添加toc-available类标记目录可用
+    body.classList.add('toc-available');
+
+    if (toc && tocToggleBtn) {
+      // 初始状态：显示
+      toc.style.display = 'block';
+      tocToggleBtn.textContent = '隐藏';
+
+      tocToggleBtn.addEventListener('click', function() {
+        if (toc.style.display === 'none' || getComputedStyle(toc).display === 'none') {
+          // 显示目录和侧边栏
+          toc.style.display = 'block';
+          tocToggleBtn.textContent = '隐藏';
+
+          // 移除隐藏类
+          body.classList.remove('toc-hidden', 'sidebar-hidden');
+          if (wrapperSidebar) {
+            wrapperSidebar.style.display = 'block';
+          }
+        } else {
+          // 隐藏目录和侧边栏
+          toc.style.display = 'none';
+          tocToggleBtn.textContent = '显示';
+
+          // 添加隐藏类以触发全宽样式
+          body.classList.add('toc-hidden', 'sidebar-hidden');
+          if (wrapperSidebar) {
+            wrapperSidebar.style.display = 'none';
+          }
+        }
+      });
+    }
+    {% else %}
+    // 没有目录的情况：只控制侧边栏
+    const wrapperSidebar = document.querySelector('.wrapper-sidebar');
+    const body = document.body;
+    if (wrapperSidebar) {
+      // 创建一个控制按钮
+      const sidebarToggleBtn = document.createElement('div');
+      sidebarToggleBtn.className = 'sidebar-toggle-btn';
+      sidebarToggleBtn.innerHTML = '<span class="sidebar-toggle-icon">隐藏</span>';
+      document.body.appendChild(sidebarToggleBtn);
+
+      // 初始状态：显示侧边栏
+      wrapperSidebar.style.display = 'block';
+      sidebarToggleBtn.querySelector('.sidebar-toggle-icon').textContent = '隐藏';
+
+      sidebarToggleBtn.addEventListener('click', function() {
+        if (wrapperSidebar.style.display === 'none' || getComputedStyle(wrapperSidebar).display === 'none') {
+          // 显示侧边栏
+          wrapperSidebar.style.display = 'block';
+          sidebarToggleBtn.querySelector('.sidebar-toggle-icon').textContent = '隐藏';
+          body.classList.remove('sidebar-hidden');
+        } else {
+          // 隐藏侧边栏
+          wrapperSidebar.style.display = 'none';
+          sidebarToggleBtn.querySelector('.sidebar-toggle-icon').textContent = '显示';
+          body.classList.add('sidebar-hidden');
+        }
+      });
+    }
+    {% endif %}
+  });
+</script>
