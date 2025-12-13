@@ -26,9 +26,8 @@ fi
 
 # 启动 Jekyll 服务器
 echo "正在启动本地服务器..."
-jekyll serve --watch --incremental --host=0.0.0.0
-
 echo
 echo "本地服务器已启动！"
 echo "请在浏览器中访问: http://localhost:4000 或 http://$(hostname -I | awk '{print $1}'):4000"
 echo
+jekyll serve --watch --incremental --host=0.0.0.0

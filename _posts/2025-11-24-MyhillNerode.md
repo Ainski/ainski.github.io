@@ -5,6 +5,7 @@ date: 2025-11-24
 tags: [学校课程复习,形式语言与自动机]
 comments: true
 author: Ainski
+toc : true
 ---
 
 [内容来源](https://inshi-notes.zephyr-zdz.space/Wiki/CS/Formal-Language--and--Automata/Myhill-Nerode-%E5%AE%9A%E7%90%86)
