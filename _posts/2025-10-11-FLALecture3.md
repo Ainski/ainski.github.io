@@ -5,7 +5,9 @@ date:   2025-10-11
 tags: [笔记,形式语言与自动机]
 comments: true
 author: Ainski
+toc : true
 ---
+
 # Lecture3
 ## 自动机
 - 一个有穷自动机可以接收$\epsilon$

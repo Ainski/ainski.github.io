@@ -5,7 +5,9 @@ date:   2025-10-09
 tags: [教程,操作系统]
 comments: true
 author: Ainski
+toc : true
 ---
+
 <!-- more -->
 `本文来源于操作系统第四版57页内容`
 ### 提出

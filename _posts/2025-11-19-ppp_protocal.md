@@ -5,6 +5,7 @@ date: 2025-11-19
 tags: [学校课程复习,计算机网络]
 comments: true
 author: Ainski
+toc : true
 ---
 
 # ppp协议

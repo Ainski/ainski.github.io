@@ -1,14 +1,8 @@
 <!DOCTYPE html>
 <html>
   {% include head.html %}
-  <body>
+  <body class="{% if page.layout == 'post' %}post-page{% endif %}">
     {% include nav.html %}
-
-    {% if page.toc==true %}
-      <aside class="toc">
-        {% include toc.html html=content h_max=3%}
-      </aside>
-    {% endif %}
 
     <div id="main" role="main" class="wrapper-content">
       <div class="container">
@@ -25,10 +19,70 @@
   </script>
   {% endif %}
 
+  <!-- 引入 Mermaid 支持 -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+  <script>
+    // 配置 mermaid
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'default',
+      securityLevel: 'loose',
+      fontFamily: 'inherit'
+    });
+
+    // 如果自动初始化失败，手动查找和渲染Mermaid代码块
+    document.addEventListener('DOMContentLoaded', function() {
+      // 查找所有的 mermaid 代码块并渲染
+      const codeBlocks = document.querySelectorAll('pre code.language-mermaid, pre code.mermaid, div.highlighter-rouge div.highlight, .language-mermaid');
+
+      codeBlocks.forEach(function(codeBlock, index) {
+        // 查找父级 pre 元素
+        let preElement = codeBlock.closest('pre');
+        if (!preElement) {
+          preElement = codeBlock.parentElement;  // 如果直接是 div 则向上找一级
+        }
+
+        if (!preElement) return;
+
+        // 获取代码内容
+        const codeContent = codeBlock.textContent || codeBlock.innerText;
+
+        // 检查是否包含 mermaid 语法
+        if (codeContent.toLowerCase().includes('graph') ||
+            codeContent.toLowerCase().includes('flowchart') ||
+            codeContent.toLowerCase().includes('sequence') ||
+            codeContent.toLowerCase().includes('gantt') ||
+            codeContent.toLowerCase().includes('class') ||
+            codeContent.toLowerCase().includes('state') ||
+            codeContent.toLowerCase().includes('pie')) {
+
+          // 创建一个容器来存放渲染后的图表
+          const chartDiv = document.createElement('div');
+          chartDiv.className = 'mermaid';
+          chartDiv.id = 'mermaid-chart-' + index;
+          chartDiv.innerHTML = codeContent;
+
+          // 将图表插入到页面中，替换原来的代码块
+          preElement.style.display = 'none'; // 隐藏原来的代码块
+          preElement.parentNode.insertBefore(chartDiv, preElement);
+
+          // 渲染图表
+          try {
+            mermaid.render('mermaid-chart-' + index, codeContent, function(svgCode) {
+              chartDiv.innerHTML = svgCode;
+            });
+          } catch (error) {
+            console.warn('Mermaid 解析失败:', error);
+            preElement.style.display = 'block'; // 如果失败则显示原文档
+          }
+        }
+      });
+    });
+  </script>
+
   <div class="wrapper-footer-mobile">
     <footer class="footer">
       {% include footer.html %}
     </footer>
-
-
+  </div>
 </html>

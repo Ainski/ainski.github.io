@@ -350,6 +350,7 @@ void protocol4 (void)
 #### selective repeat协议
 
 考虑下面的情形。
+
 ```mermaid
 sequenceDiagram
     participant Sender

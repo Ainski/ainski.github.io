@@ -71,7 +71,7 @@ $P_k(t_1,t_2)＝P\{N(t_2)－N(t_1)＝k\}$（$k=0、1、2、…$，且$0≤t_1<t_
 5. 联立（A-1）、（A-2）、（A-3）式，可得：
 $\bar{N}_t=\lambda_t \cdot T_t$  ——（A-4）
 
-6. 当网络处于**稳定状态**时，令$\bar{N}=\lim_{t \to \infty}\bar{N}_t$、$\lambda=\lim_{t \to \infty}\lambda_t$、$T=\lim_{t \to \infty}T_t$，则（A-4）式可改写为：
+6. 当网络处于**稳定状态**时，令 $\bar{N}=\lim_{t \to \infty}\bar{N}_t$、 $\lambda=\lim_{t \to \infty}\lambda_t$、 $T=\lim_{t \to \infty}T_t$，则（A-4）式可改写为：
 $\bar{N}=\lambda \cdot T$  ——（A-5）
 
 ### 定律核心含义
