@@ -869,4 +869,109 @@ initail(semaphore *S){
 #### 生产者消费者问题
 多个进程之间共享存储。（这个好像计算机网络当中的数据链路层停等法的协议）
 1. 生产者和和消费者通过缓冲存储区发生联系
-2. 两个进程共同使用一个指针
+2. 两个进程共同使用一个指针 ，生产者在放入一个产品前，需要确保有一个空的位置；消费者在取走一个产品后，发送一个有一个空单元的消息。
+3. 消费者在取走一个满单元前，需要有一个满单元的信号量，生产者在放入一个单元后，发送一个有一个满单元的信息
+
+```c++
+// 共享缓冲区
+buffer: 固定大小的队列（大小 = N）
+// 信号量
+mutex = 1           // 互斥信号量，确保缓冲区操作互斥
+empty = N           // 空闲缓冲区数量（初始为N）
+full  = 0           // 已占用的缓冲区数量（初始为0）
+producer() {
+    while (true) {
+        item = produce_item()// 1. 生产数据项
+        wait(empty)// 2. 等待空闲缓冲区
+        wait(mutex)// 3. 进入临界区（操作缓冲区）
+        buffer.insert(item) // 4. 将数据放入缓冲区
+        signal(mutex)// 5. 离开临界区
+        signal(full) // 6. 增加已占用缓冲区计数
+    }
+}
+
+
+consumer() {
+    while (true) {
+        wait(full)// 1. 等待缓冲区有数据
+        wait(mutex)// 2. 进入临界区
+        item = buffer.remove()// 3. 从缓冲区取出数据
+        signal(mutex)        // 4. 离开临界区
+        signal(empty)         // 5. 增加空闲缓冲区计数
+        consume_item(item)        // 6. 消费数据项
+    }
+}
+```
+
+- 为什么不能先进行互斥等待，再进行缓冲区有数据等待，
+```c++
+// 共享缓冲区
+buffer: 固定大小的队列（大小 = N）
+// 信号量
+mutex = 1           // 互斥信号量，确保缓冲区操作互斥
+empty = N           // 空闲缓冲区数量（初始为N）
+full  = 0           // 已占用的缓冲区数量（初始为0）
+producer() {
+    while (true) {
+        item = produce_item()// 1. 生产数据项
+		wait(mutex)// 3. 进入临界区（操作缓冲区）
+        wait(empty)// 2. 等待空闲缓冲区
+        buffer.insert(item) // 4. 将数据放入缓冲区
+		signal(full) // 6. 增加已占用缓冲区计数
+        signal(mutex)// 5. 离开临界区
+    }
+}
+
+
+consumer() {
+    while (true) {
+		wait(mutex)// 2. 进入临界区
+        wait(full)// 1. 等待缓冲区有数据
+        item = buffer.remove()// 3. 从缓冲区取出数据
+        signal(mutex)        // 4. 离开临界区
+        consume_item(item)        // 6. 消费数据项
+		signal(empty)         // 5. 增加空闲缓冲区计数
+    }
+}
+```
+原因是，如果这个时候，资源量满，这个时候producer上台，由于empty信号不满足陷入睡眠，这个时候consumer没有办法上台消费一个产品让producer上台，因为mutex信号量被producer占用了。这个时候，两个进程陷入死锁。
+
+一般情况下，同步信号量在外，互斥信号量在内。
+
+#### 理发师问题
+![alt text](../images/1970-01-01-box.png)
+开关被拨亮了意味着有人来找，拨关意味着服务完成。
+```c++
+#define CHAIRS 5
+
+semaphore customers = 0;
+semaphore barbers = 0;
+semaphore mutex = 1;
+int waiting = 0;
+
+void barber() {
+    while (true) {
+        wait(customers);  // 等待顾客
+        wait(mutex);
+        waiting--;
+        signal(mutex);
+        
+        // 理发
+        cut_hair();
+    }
+}
+
+void customer() {
+    wait(mutex);
+    if (waiting < CHAIRS) {
+        waiting++;
+        signal(customers);
+        signal(mutex);
+        wait(barbers);  // 等待理发师
+        get_haircut();
+    } else {
+        signal(mutex);
+        leave_shop();
+    }
+}
+```
