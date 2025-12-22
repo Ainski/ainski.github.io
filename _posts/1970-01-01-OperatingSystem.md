@@ -946,17 +946,16 @@ consumer() {
 
 semaphore customers = 0;
 semaphore barbers = 0;
-semaphore mutex = 1;
+semaphore mutex = 1; //互斥信号量保证waiting的访问
 int waiting = 0;
 
 void barber() {
     while (true) {
-        wait(customers);  // 等待顾客
+        wait(customers);  // 理发师需要有顾客等候的消息
         wait(mutex);
         waiting--;
-        signal(mutex);
-        
-        // 理发
+        signal(mutex);// 理发
+		signal(barbers);  // 通知可以来剪发 #@#
         cut_hair();
     }
 }
@@ -965,7 +964,7 @@ void customer() {
     wait(mutex);
     if (waiting < CHAIRS) {
         waiting++;
-        signal(customers);
+        signal(customers);//顾客来了要告诉理发师有人在等
         signal(mutex);
         wait(barbers);  // 等待理发师
         get_haircut();
@@ -975,3 +974,72 @@ void customer() {
     }
 }
 ```
+不必等到cut_hair()结束之后，再进行释放，因为这个时候无法有新的客户来进入等待队列。
+
+
+#### 读者写者问题
+
+读操作是可以并行执行的，而写操作是串行执行的。
+读进程优先的控制策略
+```c++
+semaphore wmutex;
+semaphore rmutex;
+int readcount=0;
+
+void writer()
+{
+	P(wmutex);
+	WRITEUNIT();
+	V(wmutex);
+}
+
+void reader(){
+	P(rmutex);
+	readcount++;
+	if(readcount==1) P(wmutex);
+	V(rumtex);
+	READUNIT();
+	P(rmutex);
+	readcount--;
+	if(readcount == 0) V(wmutex); //不允许脏读
+	V(rmutex);
+}
+```
+然而，如果有太多的读进程，会导致写进程饿死。
+
+
+一种相对公平的策略的设计：
+```c++
+semaphore wrmutex;
+semaphore wmutex;
+semaphore rmutex;
+int readcount=0;
+void reader()
+{
+	P(wrmutex);
+	V(wrmutex);
+
+	P(rmutex)
+	if(readcount==0) P(wmutex);
+	readcount++;
+	V(rmutex);
+
+	READUNIT();
+
+	P(rmutex);
+	readcount--;
+	if(readcount==0) V(wmutex);
+	V(rmutex);
+
+	
+}
+void writer()
+{
+	P(wrmutex);
+	P(wmutex);
+
+	WRITEUNIT();
+
+	V(wmutex);
+	V(wrmutex);
+}
