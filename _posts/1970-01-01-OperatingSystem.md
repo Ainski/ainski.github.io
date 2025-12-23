@@ -1199,3 +1199,311 @@ LUT 表 Logical Unit Tables 用于设备的名映射。
 
 #### 硬件优化
 高速缓冲区，重复读，延迟写，预读
+
+## 6.4 磁盘存储器管理
+
+- 磁盘调度算法
+- 磁盘高速缓存
+	利用数据时空局部性和操作时空局部性
+
+### 6.4.1 UNIX块设备的读写过程
+
+- 找到逻辑块号
+- 逻辑结构为多个512B的块。文件系统完成了逻辑块号到物理块号的转化。
+- 设备管理系统要分配缓存
+	- 缓存是否在忙
+	- 缓存在读or写
+#### buffer control block
+##### buf.h
+
+```c++
+// buf.h
+#ifndef BUF_H
+#define BUF_H
+
+/*
+ * 缓存控制块buf定义
+ * 记录了相应缓存的使用情况等信息；
+ * 同时兼任I/O请求块，记录该缓存
+ * 相关的I/O请求和执行结果。
+ */
+class Buf
+{
+public:
+	enum BufFlag	/* b_flags中标志位 */
+	{
+		B_WRITE = 0x1,		/* 写操作。将缓存中的信息写到硬盘上去 */
+		B_READ	= 0x2,		/* 读操作。从盘读取信息到缓存中 */
+		B_DONE	= 0x4,		/* I/O操作结束 */
+		B_ERROR	= 0x8,		/* I/O因出错而终止 */
+		B_BUSY	= 0x10,		/* 相应缓存正在使用中 */
+		B_WANTED = 0x20,	/* 有进程正在等待使用该buf管理的资源，清B_BUSY标志时，要唤醒这种进程 */
+		B_ASYNC	= 0x40,		/* 异步I/O，不需要等待其结束 */
+		B_DELWRI = 0x80		/* 延迟写，在相应缓存要移做他用时，再将其内容写到相应块设备上 */
+	};
+	
+public:
+	unsigned int b_flags;	/* 缓存控制块标志位 */
+	
+	int		padding;		/* 4字节填充，使得b_forw和b_back在Buf类中与Devtab类
+							 * 中的字段顺序能够一致，否则强制转换会出错。 */
+	/* 缓存控制块队列勾连指针 */
+	Buf*	b_forw;
+	Buf*	b_back;
+	Buf*	av_forw;
+	Buf*	av_back;
+	
+	short	b_dev;			/* 主、次设备号，其中高8位是主设备号，低8位是次设备号 */
+	int		b_wcount;		/* 需传送的字节数 */
+	unsigned char* b_addr;	/* 指向该缓存控制块所管理的缓冲区的首地址 */
+	int		b_blkno;		/* 磁盘逻辑块号 */
+	int		b_error;		/* I/O出错时信息 */
+	int		b_resid;		/* I/O出错时尚未传送的剩余字节数 */
+};
+
+#endif
+
+```
+
+其中
+- b_dev b_blkno 负责了一个磁盘上的逻辑块
+- b_addr b_wcount 负责了一个缓冲区
+
+- 所有的读操作都是同步的读
+- 所有的写是异步的写
+- B_DEKWRI 相当于数据的修改位
+
+
+##### 缓存管理
+有两个队列，一个叫做曾用io，一个叫做正在用的io。
+内核需要完成如下过程：
+
+|各个标志位|使用场景|
+|---|---|
+|B_DELWRI|延迟写才有，且这是一个已经读取完成的块|
+|B_ASYNC|异步IO才有|
+|B_WANTED|等待重用时才有|
+|B_BUSY|正在读取时才有|
+|B_ERROR|出错时才有|
+|B_DONE|读取完成时才有 与 B_BUZY是互斥的|
+|B_READ|读操作才有|
+|B_WRITE|写操作才有|
+
+```mermaid
+flowchart TD
+A[try to get a buffer] -->B{可以重用吗？}
+B --> |yes|C{是否读取完成？B_DONE}
+C --> |yes| D[直接使用]
+C --> |no| E[睡眠等待,给B_Wanted标志位增加]
+B --> |no| F[找最久没有被使用的缓存]
+B --> |no| G[为了io操作管理的方便]
+
+```
+
+在`找最久没有被使用的缓存`这一部分，每个设备的缓存排列为一个fifo队列，寻找缓存的时候，先从本设备的队列当中找重用，找不到再从自由队首分配。
+对于一块缓存，它在被使用之后，会在设备队列当中和自由队列当中同时存在，如果被使用，那么回到设备队列当中，如果排到自由队列队首，那么给其他人使用。
+
+其实这个过程是用软件实现的一个精准LRU。
+
+##### BufferManager.h
+
+```c++
+// BufferManager.h
+#ifndef BUFFER_MANAGER_H
+#define BUFFER_MANAGER_H
+
+#include "Buf.h"
+#include "DeviceManager.h"
+
+class BufferManager
+{
+public:
+	/* static const member */
+	static const int NBUF = 15;			/* 缓存控制块、缓冲区的数量 */
+	static const int BUFFER_SIZE = 512;	/* 缓冲区大小。 以字节为单位 */
+
+public:
+	BufferManager();
+	~BufferManager();
+	
+	void Initialize();					/* 缓存控制块队列的初始化。将缓存控制块中b_addr指向相应缓冲区首地址。*/
+	
+	Buf* GetBlk(short dev, int blkno);	/* 申请一块缓存，用于读写设备dev上的字符块blkno。*/
+	void Brelse(Buf* bp);				/* 释放缓存控制块buf */
+	void IOWait(Buf* bp);				/* 同步方式I/O，等待I/O操作结束 */
+	void IODone(Buf* bp);				/* I/O操作结束善后处理 */
+
+	Buf* Bread(short dev, int blkno);	/* 读一个磁盘块。dev为主、次设备号，blkno为目标磁盘块逻辑块号。 */
+	Buf* Breada(short adev, int blkno, int rablkno);	/* 读一个磁盘块，带有预读方式。
+														 * adev为主、次设备号。blkno为目标磁盘块逻辑块号，同步方式读blkno。
+														 * rablkno为预读磁盘块逻辑块号，异步方式读rablkno。 */
+	void Bwrite(Buf* bp);				/* 写一个磁盘块 */
+	void Bdwrite(Buf* bp);				/* 延迟写磁盘块 */
+	void Bawrite(Buf* bp);				/* 异步写磁盘块 */
+
+	void ClrBuf(Buf* bp);				/* 清空缓冲区内容 */
+	void Bflush(short dev);				/* 将dev指定设备队列中延迟写的缓存全部输出到磁盘 */
+	bool Swap(int blkno, unsigned long addr, int count, enum Buf::BufFlag flag);
+										/* Swap I/O 用于进程图像在内存和盘交换区之间传输
+										 * blkno: 交换区中盘块号；addr:  进程图像(传送部分)内存起始地址；
+										 * count: 进行传输字节数，byte为单位；传输方向flag: 内存->交换区 or 交换区->内存。 */
+	Buf& GetSwapBuf();					/* 获取进程图像传送请求块Buf对象引用 */
+	Buf& GetBFreeList();				/* 获取自由缓存队列控制块Buf对象引用 */
+
+private:
+	void GetError(Buf* bp);				/* 获取I/O操作中发生的错误信息 */
+	void NotAvail(Buf* bp);				/* 从自由队列中摘下指定的缓存控制块buf */
+	Buf* InCore(short adev, int blkno);	/* 检查指定字符块是否已在缓存中 */
+	
+private:
+	Buf bFreeList;						/* 自由缓存队列控制块 */
+	Buf SwBuf;							/* 进程图像传送请求块 */
+	Buf m_Buf[NBUF];					/* 缓存控制块数组 */
+	unsigned char Buffer[NBUF][BUFFER_SIZE];	/* 缓冲区数组 */
+	
+	DeviceManager* m_DeviceManager;		/* 指向设备管理模块全局对象 */
+};
+
+#endif
+```
+
+```c++
+/* 块设备表devtab定义 */
+class Devtab
+{
+public:
+	Devtab();
+	~Devtab();
+	
+public:
+	int	d_active;
+	int	d_errcnt;
+	Buf* b_forw;
+	Buf* b_back;
+	Buf* d_actf;
+	Buf* d_actl;
+};
+
+```
+其中，
+- Buf bFreeList 自由队列，整个系统只有一个
+	- Buf*	b_forw; Nodev 队列与设备无关的buf
+	- Buf*	b_back; Nodev 队列与设备无关的buf
+	- Buf*	av_forw; 自由队列
+	- Buf*	av_back; 自由队列
+- Devtab 
+	- Buf* b_forw; 设备队列，正在或曾经用于该设备
+	- Buf* b_back; 设备队列，正在或曾经用于该设备
+	- Buf* d_actf; I/O请求队列，正在用于进行I/O,B_Buzy
+	- Buf* d_actl; I/O请求队列，正在用于进行I/O,B_Buzy
+
+一个Buf的生命会经历：
+- 出生：自由队列和NODEV队列
+- 读写：设备队列和I/O请求队列
+- 释放：自由队列 和 设备队列（表示曾用），只要未重分配就保持原内容
+
+##### GetBlk 函数
+```c++
+Buf* BufferManager::GetBlk(short dev, int blkno)
+{
+	Buf* bp;
+	Devtab* dp;
+	User& u = Kernel::Instance().GetUser();
+
+	/* 如果主设备号超出了系统中块设备数量 */
+	if( Utility::GetMajor(dev) >= this->m_DeviceManager->GetNBlkDev() )
+	{
+		Utility::Panic("nblkdev: There doesn't exist the device");
+	}
+
+	/* 
+	 * 如果设备队列中已经存在相应缓存，则返回该缓存；
+	 * 否则从自由队列中分配新的缓存用于字符块读写。
+	 */
+loop:
+	/* 表示请求NODEV设备中字符块 */
+	if(dev < 0)
+	{
+		dp = (Devtab *)(&this->bFreeList);
+	}
+	else
+	{
+		short major = Utility::GetMajor(dev);
+		/* 根据主设备号获得块设备表 */
+		dp = this->m_DeviceManager->GetBlockDevice(major).d_tab;
+
+		if(dp == NULL)
+		{
+			Utility::Panic("Null devtab!");
+		}
+		/* 首先在该设备队列中搜索是否有相应的缓存 */
+		for(bp = dp->b_forw; bp != (Buf *)dp; bp = bp->b_forw)
+		{
+			/* 不是要找的缓存，则继续 */
+			if(bp->b_blkno != blkno || bp->b_dev != dev)
+				continue;
+
+			/* 
+			 * 临界区之所以要从这里开始，而不是从上面的for循环开始。
+			 * 主要是因为，中断服务程序并不会去修改块设备表中的
+			 * 设备buf队列(b_forw)，所以不会引起冲突。
+			 */
+			X86Assembly::CLI();
+			if(bp->b_flags & Buf::B_BUSY)
+			{
+				bp->b_flags |= Buf::B_WANTED;
+				u.u_procp->Sleep((unsigned long)bp, ProcessManager::PRIBIO);
+				X86Assembly::STI();
+				goto loop;
+			}
+			X86Assembly::STI();
+			/* 从自由队列中抽取出来 */
+			this->NotAvail(bp);
+			return bp;
+		}
+	}//end of else
+
+	X86Assembly::CLI();
+	/* 如果自由队列为空 */
+	if(this->bFreeList.av_forw == &this->bFreeList)
+	{
+		this->bFreeList.b_flags |= Buf::B_WANTED;
+		u.u_procp->Sleep((unsigned long)&this->bFreeList, ProcessManager::PRIBIO);
+		X86Assembly::STI();
+		goto loop;
+	}
+	X86Assembly::STI();
+
+	/* 取自由队列第一个空闲块 */
+	bp = this->bFreeList.av_forw;
+	this->NotAvail(bp);
+
+	/* 如果该字符块是延迟写，将其异步写到磁盘上 */
+	if(bp->b_flags & Buf::B_DELWRI)
+	{
+		bp->b_flags |= Buf::B_ASYNC;
+		this->Bwrite(bp);
+		goto loop;
+	}
+	/* 注意: 这里清除了所有其他位，只设了B_BUSY */
+	bp->b_flags = Buf::B_BUSY;
+
+	/* 从原设备队列中抽出 */
+	bp->b_back->b_forw = bp->b_forw;
+	bp->b_forw->b_back = bp->b_back;
+	/* 加入新的设备队列 */
+	bp->b_forw = dp->b_forw;
+	bp->b_back = (Buf *)dp;
+	dp->b_forw->b_back = bp;
+	dp->b_forw = bp;
+
+	bp->b_dev = dev;
+	bp->b_blkno = blkno;
+	return bp;
+}
+```
+- 遇到需要的块在B_Buzy的话，因为等待io读写而睡，睡眠原因指向该缓存控制块的指针sleep(bp,PRIBIO)
+- 缓冲位的脏位采用写回法，遇到自由队列队首的脏位置后，写回这个缓冲块，并把它放到自由队列的队尾重排一次。
+- 如果队列当中所有的缓冲块都在buzy，那么对第一个加一个B_WANTED标志位，睡眠当前进程，等待缓冲块可用。睡眠原因为等待自由缓存队列队首的指针，sleep(Free,PRIBIO)
+
+
