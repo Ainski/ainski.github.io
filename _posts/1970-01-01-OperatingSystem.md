@@ -1206,7 +1206,7 @@ LUT 表 Logical Unit Tables 用于设备的名映射。
 - 磁盘高速缓存
 	利用数据时空局部性和操作时空局部性
 
-### 6.4.1 UNIX块设备的读写过程
+### 6.4.1 UNIX块设备的读过程
 
 - 找到逻辑块号
 - 逻辑结构为多个512B的块。文件系统完成了逻辑块号到物理块号的转化。
@@ -1506,4 +1506,407 @@ loop:
 - 缓冲位的脏位采用写回法，遇到自由队列队首的脏位置后，写回这个缓冲块，并把它放到自由队列的队尾重排一次。
 - 如果队列当中所有的缓冲块都在buzy，那么对第一个加一个B_WANTED标志位，睡眠当前进程，等待缓冲块可用。睡眠原因为等待自由缓存队列队首的指针，sleep(Free,PRIBIO)
 
+##### Bread 函数
 
+```c++
+Buf* BufferManager::Bread(short dev, int blkno)
+{
+	Buf* bp;
+	/* 根据设备号，字符块号申请缓存 */
+	bp = this->GetBlk(dev, blkno);
+	/* 如果在设备队列中找到所需缓存，即B_DONE已设置，就不需进行I/O操作 */
+	if(bp->b_flags & Buf::B_DONE)
+	{
+		return bp;
+	}
+	/* 没有找到相应缓存，构成I/O读请求块 */
+	bp->b_flags |= Buf::B_READ;
+	bp->b_wcount = BufferManager::BUFFER_SIZE;
+
+
+	/* 
+	 * 将I/O请求块送入相应设备I/O请求队列，如无其它I/O请求，则将立即执行本次I/O请求；
+	 * 否则等待当前I/O请求执行完毕后，由中断处理程序启动执行此请求。
+	 * 注：Strategy()函数将I/O请求块送入设备请求队列后，不等I/O操作执行完毕，就直接返回。
+	 */
+	this->m_DeviceManager->GetBlockDevice(Utility::GetMajor(dev)).Strategy(bp);
+	/* 同步读，等待I/O操作结束 */
+	this->IOWait(bp);
+	return bp;
+}
+```
+
+想要某一个磁盘文件，就要用getblk获得对应的块，如果这个块是已经加载好的，直接用就可以，否则要等待磁盘读取。
+
+等待DMA读取完成之后发出中断请求，读取对应的内容。
+
+##### ATADriver
+
+```c++
+void ATADriver::ATAHandler(struct pt_regs *reg, struct pt_context *context)
+{
+	Buf* bp;
+	Devtab* atab;
+	short major = Utility::GetMajor(DeviceManager::ROOTDEV);
+
+	BlockDevice& bdev = 
+		Kernel::Instance().GetDeviceManager().GetBlockDevice(major);
+	atab = bdev.d_tab;
+	
+	if( atab->d_active == 0 )
+	{
+		return;		/* 没有请求项 */
+	}
+
+	bp = atab->d_actf;		/* 获取本次中断对应的I/O请求Buf */
+	atab->d_active = 0;		/* 表示设备已经空闲 */
+
+	/* 检查I/O操作执行过程中磁盘控制器或者DMA控制器是否出错 */
+	if( ATADriver::IsError() || DMA::IsError() )
+	{
+		if(++atab->d_errcnt <= 10)
+		{
+			bdev.Start();
+			return;
+		}
+		bp->b_flags |= Buf::B_ERROR;// 超过10次出错，则标记为错误
+	}
+	
+	atab->d_errcnt = 0;		/* 错误计数器归零 */
+	atab->d_actf = bp->av_forw;		/* 从I/O请求队列中取出已完成的I/O请求Buf */
+	Kernel::Instance().GetBufferManager().IODone(bp);	/* I/O结束善后工作 */
+	bdev.Start();	/* 启动I/O请求队列中下一个I/O请求 */
+	/* 对主、从8259A中断控制芯片分别发送EOI命令。 */
+	IOPort::OutByte(Chip8259A::MASTER_IO_PORT_1, Chip8259A::EOI);
+	IOPort::OutByte(Chip8259A::SLAVE_IO_PORT_1, Chip8259A::EOI);
+	return;
+}
+```
+
+```c++
+void BufferManager::IODone(Buf* bp)
+{
+	/* 置上I/O完成标志 */
+	bp->b_flags |= Buf::B_DONE;
+	if(bp->b_flags & Buf::B_ASYNC)
+	{
+		/* 如果是异步操作,立即释放缓存块 */
+		this->Brelse(bp);
+	}
+	else
+	{
+		/* 清除B_WANTED标志位 */
+		bp->b_flags &= (~Buf::B_WANTED);
+		Kernel::Instance().GetProcessManager().WakeUpAll((unsigned long)bp);//睡在这个缓冲块的是B_WANTED 和 真正发起IO操作的进程的 ，这两类进程被唤醒了
+	}
+	return;
+}
+
+void ATABlockDevice::Start()
+{
+	Buf* bp;
+
+	if( (bp = this->d_tab->d_actf) == 0 )
+		return;		/* 如果I/O请求队列为空，则立即返回 */
+
+	this->d_tab->d_active++;	/* I/O请求队列不空，设置控制器忙标志 */
+
+	/* 设置磁盘寄存器，启动I/O操作 */
+	ATADriver::DevStart(bp);
+}
+```
+
+
+### 6.4.2 UNIX块是被的写过程
+
+1. 找到逻辑地址对应的磁盘块号
+	- 如果写入的是512个字节 ，不需要读块上的所有内容，跳过读取异步写。
+	- 如果写入的不是512字节，就需要读取所有的blk。如果没有写到最后一个字节，认为有可能还会继续追加，所以不写回。带着延迟写标志在设备队列和自由队列里排队。直到写到最后一个字节，启动一次异步写。
+		如果从队尾排列到队头，被其他进程征用，需要启动一次异步写并重新加到队尾。
+	- 将用户地址空间内容 **异步** 写入。进程不会等待写入的过程。对于写操作，写完之后缓存会直接释放掉。读操作会留下来，因为这个缓冲块有可能还要用。
+2. 分配一个缓存
+3. 写入缓存
+4. 完成对应的所有写操作
+
+对于一次写的过程，要看写的过程跨越了几个逻辑块，那么一次写操作就要按照逻辑块依次按照我们之前的所有情况异步写入。其实只有最后一个块可能会不被立刻写入。如果突然掉电的话，就寄啦！！！因为就丢掉啦！！！
+
+### 6.4.3 缓存的竞争使用
+
+- 进程有三种情况会谁在缓存上
+	- B_BUZY进程，加上B_WANTED
+	- 因为等待IO入睡的进程，为进程添加B_BUZY
+		睡眠原因一致，优先级一致。如果是第一种进程起来了，发现不是B_BUZY的添加者，无法清除B_BUZY标志，接着睡
+	- 获取新缓存失败的进程
+![alt text](../images/1970-01-01-os-block.png)
+
+# 7 文件系统
+文件是具有文件名的一组相关信息的集合。
+- 系统角度，文件系统是对文件的存储空间进行组织、分配，负责文件的存储并对存储的文件进行保护、检索的系统。
+- 用户角度，文件系统主要实现了对文件的按名存取。
+
+## 7.1 文件系统概述
+- 文件系统的接口：
+	- 命令接口
+	- 程序接口
+- 对对象操纵和管理的软件集合
+	- 文件的管理
+- 对象及其属性
+	目录、文件、存储空间
+
+### 7.1.1 分类
+- 按用途分类：
+	- 系统文件：系统软件构成的文件
+	- 库文件: 标准或常用例程
+	- 用户文件
+- 按照存取控制区分：读、写、可执行
+- 按组织形式分：普通文件，目录文件，特殊文件（I/O设备）
+- 按文件中的信息流性质分： 输入、输入、输入输出
+
+### 7.1.2 基本要求
+1. 按照用户要求创建和删除文件
+2. 按用户要求进行文件读写
+3. 用户使用文件符号名实现文件访问，文件的物理组织对用户是透明的
+4. 管理文件存储空间，自动分配，建立文件逻辑结构以及物理结构之间的映照关系。
+5. 共享和保密
+
+## 7.2 UNIX文件系统
+带有索引的树状目录接口。
+
+### 7.2.1 文件的创建
+
+
+fd = creat (name, mode)
+- name 文件名
+	- 文件存在——提示重复
+	- 文件不存在——创建文件
+	- 文件路径错误——报错
+- mode 权限
+	一个9位的二进制变量，从高位到低位依次对应了文件主、同组用户、其他用户RWE权限
+```c++
+
+//name 文件名可以是相对路径也可以是绝对路径
+//mode 取值
+	/* static const member */
+	static const unsigned int IALLOC = 0x8000;		/* 文件被使用 */
+	static const unsigned int IFMT = 0x6000;		/* 文件类型掩码 */
+	static const unsigned int IFDIR = 0x4000;		/* 文件类型：目录文件 */
+	static const unsigned int IFCHR = 0x2000;		/* 字符设备特殊类型文件 */
+	static const unsigned int IFBLK = 0x6000;		/* 块设备特殊类型文件，为0表示常规数据文件 */
+	static const unsigned int ILARG = 0x1000;		/* 文件长度类型：大型或巨型文件 */
+	static const unsigned int ISUID = 0x800;		/* 执行时文件时将用户的有效用户ID修改为文件所有者的User ID */
+	static const unsigned int ISGID = 0x400;		/* 执行时文件时将用户的有效组ID修改为文件所有者的Group ID */
+	static const unsigned int ISVTX = 0x200;		/* 使用后仍然位于交换区上的正文段 */
+	static const unsigned int IREAD = 0x100;		/* 对文件的读权限 */
+	static const unsigned int IWRITE = 0x80;		/* 对文件的写权限 */
+	static const unsigned int IEXEC = 0x40;			/* 对文件的执行权限 */
+	static const unsigned int IRWXU = (IREAD|IWRITE|IEXEC);		/* 文件主对文件的读、写、执行权限 */
+	static const unsigned int IRWXG = ((IRWXU) >> 3);			/* 文件主同组用户对文件的读、写、执行权限 */
+	static const unsigned int IRWXO = ((IRWXU) >> 6);			/* 其他用户对文件的读、写、执行权限 */
+```
+```c++
+//Creat 函数体
+/*
+ * 功能：创建一个新的文件
+ * 效果：建立打开文件结构，内存i节点开锁 、i_count 为正数（应该是 1）
+ * */
+void FileManager::Creat()
+{
+	Inode* pInode;
+	User& u = Kernel::Instance().GetUser();
+	unsigned int newACCMode = u.u_arg[1] & (Inode::IRWXU|Inode::IRWXG|Inode::IRWXO);
+
+	/* 搜索目录的模式为1，表示创建；若父目录不可写，出错返回 */
+	pInode = this->NameI(NextChar, FileManager::CREATE);
+	/* 没有找到相应的Inode，或NameI出错 */
+	if ( NULL == pInode )
+	{
+		if(u.u_error)
+			return;
+		/* 创建Inode */
+		pInode = this->MakNode( newACCMode & (~Inode::ISVTX) );
+		/* 创建失败 */
+		if ( NULL == pInode )
+		{
+			return;
+		}
+
+		/* 
+		 * 如果所希望的名字不存在，使用参数trf = 2来调用open1()。
+		 * 不需要进行权限检查，因为刚刚建立的文件的权限和传入参数mode
+		 * 所表示的权限内容是一样的。
+		 */
+		this->Open1(pInode, File::FWRITE, 2);
+	}
+	else
+	{
+		/* 如果NameI()搜索到已经存在要创建的文件，则清空该文件（用算法ITrunc()）。UID没有改变
+		 * 原来UNIX的设计是这样：文件看上去就像新建的文件一样。然而，新文件所有者和许可权方式没变。
+		 * 也就是说creat指定的RWX比特无效。
+		 * 邓蓉认为这是不合理的，应该改变。
+		 * 现在的实现：creat指定的RWX比特有效 */
+		this->Open1(pInode, File::FWRITE, 1);
+		pInode->i_mode |= newACCMode;
+	}
+}
+
+```
+### 7.2.2 文件的读写
+
+```c++
+
+void FileManager::Read()
+{
+	/* 直接调用Rdwr()函数即可 */
+	this->Rdwr(File::FREAD);
+}
+
+void FileManager::Write()
+{
+	/* 直接调用Rdwr()函数即可 */
+	this->Rdwr(File::FWRITE);
+}
+
+void FileManager::Rdwr( enum File::FileFlags mode )
+{
+	File* pFile;
+	User& u = Kernel::Instance().GetUser();
+
+	/* 根据Read()/Write()的系统调用参数fd获取打开文件控制块结构 */
+	pFile = u.u_ofiles.GetF(u.u_arg[0]);	/* fd */
+	if ( NULL == pFile )
+	{
+		/* 不存在该打开文件，GetF已经设置过出错码，所以这里不需要再设置了 */
+		/*	u.u_error = User::EBADF;	*/
+		return;
+	}
+
+
+	/* 读写的模式不正确 */
+	if ( (pFile->f_flag & mode) == 0 )
+	{
+		u.u_error = User::EACCES;
+		return;
+	}
+
+	u.u_IOParam.m_Base = (unsigned char *)u.u_arg[1];	/* 目标缓冲区首址 */
+	u.u_IOParam.m_Count = u.u_arg[2];		/* 要求读/写的字节数 */
+	u.u_segflg = 0;		/* User Space I/O，读入的内容要送数据段或用户栈段 */
+
+	/* 管道读写 */
+	if(pFile->f_flag & File::FPIPE)
+	{
+		if ( File::FREAD == mode )
+		{
+			this->ReadP(pFile);
+		}
+		else
+		{
+			this->WriteP(pFile);
+		}
+	}
+	else
+	/* 普通文件读写 ，或读写特殊文件。对文件实施互斥访问，互斥的粒度：每次系统调用。
+	为此Inode类需要增加两个方法：NFlock()、NFrele()。
+	这不是V6的设计。read、write系统调用对内存i节点上锁是为了给实施IO的进程提供一致的文件视图。*/
+	{
+		pFile->f_inode->NFlock();
+		/* 设置文件起始读位置 */
+		u.u_IOParam.m_Offset = pFile->f_offset;
+		if ( File::FREAD == mode )
+		{
+			pFile->f_inode->ReadI();
+		}
+		else
+		{
+			pFile->f_inode->WriteI();
+		}
+
+		/* 根据读写字数，移动文件读写偏移指针 */
+		pFile->f_offset += (u.u_arg[2] - u.u_IOParam.m_Count);
+		pFile->f_inode->NFrele();
+	}
+
+	/* 返回实际读写的字节数，修改存放系统调用返回值的核心栈单元 */
+	u.u_ar0[User::EAX] = u.u_arg[2] - u.u_IOParam.m_Count;
+}
+```
+
+- 读写过程用read和write函数完成
+- 所有的操作都要先打开文件
+- 文件的读写指针一直为0，每次读写为止是上一个读写位置的下一个字节。
+- 	int		f_offset;			/* 文件读写位置指针 */
+
+
+
+### 7.2.3 文件随机读取
+```c++
+
+void FileManager::Seek()
+{
+	File* pFile;
+	User& u = Kernel::Instance().GetUser();
+	int fd = u.u_arg[0];
+
+	pFile = u.u_ofiles.GetF(fd);
+	if ( NULL == pFile )
+	{
+		return;  /* 若FILE不存在，GetF有设出错码 */
+	}
+
+	/* 管道文件不允许seek */
+	if ( pFile->f_flag & File::FPIPE )
+	{
+		u.u_error = User::ESPIPE;
+		return;
+	}
+
+	int offset = u.u_arg[1];
+
+	/* 如果u.u_arg[2]在3 ~ 5之间，那么长度单位由字节变为512字节 */
+	if ( u.u_arg[2] > 2 )
+	{
+		offset = offset << 9;
+		u.u_arg[2] -= 3;
+	}
+
+	switch ( u.u_arg[2] )
+	{
+		/* 读写位置设置为offset */
+		case 0:
+			pFile->f_offset = offset;
+			break;
+		/* 读写位置加offset(可正可负) */
+		case 1:
+			pFile->f_offset += offset;
+			break;
+		/* 读写位置调整为文件长度加offset */
+		case 2:
+			pFile->f_offset = pFile->f_inode->i_size + offset;
+			break;
+	}
+}
+```
+
+### 7.2.4 文件勾连与取消
+
+勾连：通过link，虽然物理文件只有一个，但是可以有多个文件名指向它。（软连接，超链接，快捷方式）
+所有路径都是等价的，没有先后的次序关系。
+删除操作只是一个unlink操作，如果这是最后一条路径，那么就是一个文件的删除操作。
+
+## 7.3 文件的逻辑结构和物理结构
+
+逻辑结构到物理结构的映射代表着从逻辑块到物理块的映射。
+
+### 7.3.1  连续结构文件
+为每个文件分配一组相邻接的盘块。文件存放在连续编号的物理块当中，保证了文件中逻辑顺序与占用盘块顺序的一致性。
+
+优点：快；缺点：容易产生磁盘碎片，创建时需确定文件长度，不利于动态增长。
+
+### 7.3.2  链接结构文件
+- 为每个文件分配一组盘块，但不要求物理块连续。文件存放在不连续的物理块中，在物理块当中放一个指针指向下一个物理块。
+优点：不易产生碎片，适合动态增长；缺点：仅仅适合顺序存取，如果丢掉一个指针，剩下的都丢了。
+
+- 整个磁盘当中有一张文件分配表，指针信息显示存放在这张文件分配表当中。
+	使用链接方式，通过链接指针，将属于一个文件的多个离散的盘块链接为一个链表。（FAT16-FAT32-NTFS）
+
+### 7.3.3  索引结构文件
