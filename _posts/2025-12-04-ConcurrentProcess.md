@@ -6,6 +6,7 @@ tags: [学校课程复习,操作系统]
 comments: true
 author: Ainski
 ---
+
 ## swap函数
 
 ```c++
@@ -71,6 +72,7 @@ bool BufferManager::Swap(int blkno, unsigned long addr, int count, enum Buf::Buf
 - 一次和磁盘的交互都是512字节，因为一个盘块是512字节，因此count应当小于等于512字节
 ## 发生内存交换的情况
 ### 当内存空间不足以装下所有就绪进程
+
 ```c++
 	/* 
 	 * 进程图像内存和交换区之间的传送。如果有进程想要换入内存，而内存
@@ -298,6 +300,7 @@ void ProcessManager::XSwap( Process* pProcess, bool bFreeMemory, int size )
 - 上锁防止被重复换出
 - 运行到发现没有进程可以调出，sleep(&runin,-100); 其他进程再sleep函数的时候，就要让0#进程试试能不能把这个进程去换出，这个时候要求换出的进程p_time值要大于2，换入的进程p_time值要大于3
 ### 内存空间不足以存放新进程
+
 ```c++
 //这段代码来自于Newproc
 	if ( desAddress == 0 ) /* 内存不够，需要swap */
