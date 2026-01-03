@@ -1910,3 +1910,77 @@ void FileManager::Seek()
 	使用链接方式，通过链接指针，将属于一个文件的多个离散的盘块链接为一个链表。（FAT16-FAT32-NTFS）
 
 ### 7.3.3  索引结构文件
+文件索引节点inode区 202~1023盘块
+
+```c++
+class DiskInode
+{
+	/* Functions */
+public:
+	/* Constructors */
+	DiskInode();
+	/* Destructors */
+	~DiskInode();
+
+	/* Members */
+public:
+	unsigned int d_mode;	/* 状态的标志位，定义见enum INodeFlag */
+	int		d_nlink;		/* 文件联结计数，即该文件在目录树中不同路径名的数量 */
+	
+	short	d_uid;			/* 文件所有者的用户标识数 */
+	short	d_gid;			/* 文件所有者的组标识数 */
+	
+	int		d_size;			/* 文件大小，字节为单位 */
+	int		d_addr[10];		/* 用于文件逻辑块好和物理块好转换的基本索引表 */
+	
+	int		d_atime;		/* 最后访问时间 */
+	int		d_mtime;		/* 最后修改时间 */
+};
+
+```
+inode对于文件是有且只有一个的，但是路径可以有多个。
+
+- d_addr:
+	- 1-6个块称之为小文件。最大为3k
+	- 一旦超过3k，转化为间接索引，
+	d_addr[6] d_addr[7]找到了一层间接索引。占用7-（6+128*2）个块。
+	- 再往下，d_addr[8] d_addr[9]找到了二层间接索引。占用(128 \*2+7)~ ( 6 +128 \* 2 + 128 \* 128 \* 2)
+
+```c++
+
+/*
+ * 文件系统存储资源管理块(Super Block)的定义。
+ */
+class SuperBlock
+{
+	/* Functions */
+public:
+	/* Constructors */
+	SuperBlock();
+	/* Destructors */
+	~SuperBlock();
+	
+	/* Members */
+public:
+	int		s_isize;		/* 外存Inode区占用的盘块数 */
+	int		s_fsize;		/* 盘块总数 */
+	
+	int		s_nfree;		/* 直接管理的空闲盘块数量 */
+	int		s_free[100];	/* 直接管理的空闲盘块索引表 */
+	
+	int		s_ninode;		/* 直接管理的空闲外存Inode数量 */
+	int		s_inode[100];	/* 直接管理的空闲外存Inode索引表 */
+	
+	int		s_flock;		/* 封锁空闲盘块索引表标志 */
+	int		s_ilock;		/* 封锁空闲Inode表标志 */
+	
+	int		s_fmod;			/* 内存中super block副本被修改标志，意味着需要更新外存对应的Super Block */
+	int		s_ronly;		/* 本文件系统只能读出 */
+	int		s_time;			/* 最近一次更新时间 */
+	int		padding[47];	/* 填充使SuperBlock块大小等于1024字节，占据2个扇区 */
+};
+```
+
+SuperBlock 200-201 \# 盘块
+
+s_inode 获得100个空闲的inode，采用栈的管理方式。 栈的方式不利于文件恢复。
