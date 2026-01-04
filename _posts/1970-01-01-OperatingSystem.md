@@ -41,6 +41,7 @@ author: Ainski
 
 # 进程
 ## UnixV6++ 进程类图
+
 ```mermaid
 classDiagram
 class ProcessManager{
@@ -137,6 +138,7 @@ Text -- Inode
 # 5 进程管理
 ## 5.1 进程的调度状态和状态转换
 ### swtch 函数
+
 ```c++
 /* 在进程切换的过程中，根本没有用到TSS */
 int ProcessManager::Swtch()
@@ -207,6 +209,7 @@ int ProcessManager::Swtch()
 }
 
 ```
+
 #### 就绪状态进程的特点
  - p_stat = SRUN
  - p_flag 包含 SLOAD标志
@@ -217,6 +220,7 @@ int ProcessManager::Swtch()
  - p_pri >= 100
 
 #### 高优先级睡眠和低优先级睡眠的区别
+
 |高优先级|低优先级|
 |-------|---------|
 |-100<=p_pri<0|0<=p_pri<100|
@@ -822,6 +826,7 @@ lock = 0；
 
 
 ### 5.4.2 dijistra方法
+
 ```c
 typedef struct{
     int value;
@@ -843,6 +848,7 @@ initail(semaphore *S){
 ```
 ### 5.4.2 进程同步
 同步信号量
+
 ```c
 typedef struct{
     int value;
@@ -904,6 +910,7 @@ consumer() {
 ```
 
 - 为什么不能先进行互斥等待，再进行缓冲区有数据等待，
+
 ```c++
 // 共享缓冲区
 buffer: 固定大小的队列（大小 = N）
@@ -1062,6 +1069,7 @@ void writer()
 	- 独占设备 临界资源
 	- 共享设备 允许多个进程并发使用
 	- 虚拟设备 把独占资源变成一个共享设备，让所有的打印信息成为队列。
+
 ### 6.1.2 设备控制器
 设备控制不能让cpu来干，必须把这个事情交给设备器完成
 由这个控制器完成与外设的交互。
@@ -1075,6 +1083,7 @@ void writer()
 	- 数据信号：双向，有缓存
 	- 控制信号：控制器要求设备完成相关操作
 	- 状态信号：当前外设正在干啥
+
 ### 6.1.3 通道
 只会做I/O操作的协处理器，cpu生成一个只包含io操作的指令，让通道控制器完成所有内容，让通道控制器自己去内存读数据写到cpu指定的位置。
 由通道完成对于设备控制器的操作。
@@ -1213,6 +1222,7 @@ LUT 表 Logical Unit Tables 用于设备的名映射。
 - 设备管理系统要分配缓存
 	- 缓存是否在忙
 	- 缓存在读or写
+
 #### buffer control block
 ##### buf.h
 
@@ -1403,6 +1413,7 @@ public:
 - 释放：自由队列 和 设备队列（表示曾用），只要未重分配就保持原内容
 
 ##### GetBlk 函数
+
 ```c++
 Buf* BufferManager::GetBlk(short dev, int blkno)
 {
@@ -1682,6 +1693,7 @@ fd = creat (name, mode)
 	- 文件路径错误——报错
 - mode 权限
 	一个9位的二进制变量，从高位到低位依次对应了文件主、同组用户、其他用户RWE权限
+
 ```c++
 
 //name 文件名可以是相对路径也可以是绝对路径
@@ -1761,6 +1773,7 @@ void FileManager::Creat()
 
 
 ### 7.2.3 文件随机读取
+
 ```c++
 
 void FileManager::Seek()
@@ -1969,6 +1982,7 @@ Inode::Inode()
 ```
 
 系统的file结构。
+
 ```c++
 /*
  * 打开文件控制块File类。
@@ -2004,6 +2018,7 @@ public:
 f_count与i_count 的相关
 
 每一个进程的user结构中有一个u_ofiles数组，用来记录当前进程打开的文件。
+
 ```c++
 class User{
 		/* 文件系统相关成员 */
