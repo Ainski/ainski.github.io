@@ -33,7 +33,8 @@
     // 如果自动初始化失败，手动查找和渲染Mermaid代码块
     document.addEventListener('DOMContentLoaded', function() {
       // 查找所有的 mermaid 代码块并渲染
-      const codeBlocks = document.querySelectorAll('pre code.language-mermaid, pre code.mermaid, div.highlighter-rouge div.highlight, .language-mermaid');
+      // 重要：只查找明确标记为 mermaid 的代码块，而不是所有包含关键词的代码块
+      const codeBlocks = document.querySelectorAll('pre code.language-mermaid, pre code.mermaid, .language-mermaid');
 
       codeBlocks.forEach(function(codeBlock, index) {
         // 查找父级 pre 元素
@@ -48,6 +49,7 @@
         const codeContent = codeBlock.textContent || codeBlock.innerText;
 
         // 检查是否包含 mermaid 语法
+        // 仅对明确标记为 mermaid 的代码块进行关键词检查
         if (codeContent.toLowerCase().includes('graph') ||
             codeContent.toLowerCase().includes('flowchart') ||
             codeContent.toLowerCase().includes('sequence') ||

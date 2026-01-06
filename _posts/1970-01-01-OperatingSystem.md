@@ -42,101 +42,12 @@ author: Ainski
 # 进程
 ## UnixV6++ 进程类图
 
-```mermaid
-classDiagram
-class ProcessManager{
-    Process porcess[NRPOC] 进程基本控制数组
-    Text test[NTEXT] 代码控制块数组
-    int CurPri 先运行占用CPU时优先数
-    int RunRun 强迫调度标志
-    int RunIn 进程中无合适进程可以调出到磁盘交换区
-    int RunOut 磁盘交换区无进程可以调入内存
-    int ExeCnt 同时进行图像改换的进程数
-    int SwtchNum 系统中进程切换次数
-}
-class Process{
-    short p_uid 用户ID
-    int p_pid 进程ID
-    int p_ppid 父进程ID
-    unsigned long p_addr ppda区在物理内存中的起始地址
-    unsigned int p_size 进程图像的长度以字节为单位
-    Text* p_textp 指向该进程代码段的段描述符
-    ProcessState p_state 进程状态
-    int p_flag 进程标志
-    int p_pri 进程优先级
-    int p_cpu CPU值
-    int p_nice 进程优先级偏置值
-    int p_time 进程在磁盘交换区或者内存上的驻留时间
-    unsigned long p_wchan 进程睡眠原因
-    int p_sig 进程接收到的信号
-    TTy* p_ttyp 进程tty结构地址
-    void Nice() 用户设置计算进程优先数偏置值
-    void SetPri() 根据占用CPU时间计算进程优先数
-    void SetRun() 设置进程为运行态
-    bool IsSleepOn(unsigned long chan) 判断进程睡眠原因是否为chan
-    void Sleep(unsigned long chan, int pri) 进程睡眠
-    void Expand(unsigned int  newSize) 改变进程占用的内存大小
-    void Exit() Exit系统调用处理过程
-    void Clone(Process& proc) 除了p_pid，子进程拷贝父进程Process结构
-    void SBreak() brk系统调用处理过程
-    void Psig(struct pt_context* pContext) 对当前进程接收到的信号进行处理
-    void PSignal(int signal) 向当前进程发送信号。signal是要发送到俄信号书
-    void Ssig() 设置用户自定西的信号处理方式的系统调用处理函数
-    int IsSig() 检查是否有信号到达当前进程
-}
-class User{
-    short u_uid 有效用户ID
-    short u_gid 有效组
-    short u_ruid 真实用户ID
-    short u_rgid 真实组ID
-    int u_time 进程用户态时间
-    int u_stime 进程核心态时间
-    int u_cutime 进程用户态时间总和
-    int u_cstime 进程核心态时间总和
-    
-    unsigned long u_rsav[2] 用于保护esp与ebp指针
-    unsigned long u_ssav[2] 用户二次保护esp与ebp指针
-
-    Process* u_procp 指向当前进程的指针
-    MemoryDescriptor* u_MemoryDescriptor 进程图像的内存信息
-    static const int EAX = 0 访问线程保护区中的EAX寄存器的偏移量
-    unsigned int * u_ar0 指向核心栈现场保护区EAX寄存区存放的栈单元
-    int u_arg[5] 存放当前系统调用参数
-    char* u_dirp 系统调用参数（pathname）的指针
-    ...
-
-}
-class Text {
-    int x_daddr 代码段在磁盘交换区上的地址
-    unsigned long x_caddr 代码段在物理内存中的起始地址
-    unsigned int x_size 代码段的长度
-    Inode* x_ipdr 内存inode地址
-    unsigned int x_count 共享该代码段的进程数
-    unsigned short x_ccount 共享该代码段且图像在内存的进程数
-}
-class Inode{
-}
-
-class MemoryDescriptor{
-}
-class DirectoryEntry{
-}
-class IOParameter{
-}
-class OpenFiles{
-}
-Process *-- ProcessManager
-Text *-- ProcessManager
-Process -- User
-User -- MemoryDescriptor
-User -- DirectoryEntry
-User -- IOParameter
-User -- OpenFiles
-Text -- Inode
-```
+![UnixV6++ 进程类图](../images/1970-01-01-os-classdiagram.svg)
 
 # 5 进程管理
 ## 5.1 进程的调度状态和状态转换
+
+
 ### swtch 函数
 
 ```c++
@@ -1051,6 +962,375 @@ void writer()
 	V(wrmutex);
 }
 ```
+
+
+## 5.5 并发进程
+
+### swap函数
+
+```c++
+	enum BufFlag	/* b_flags中标志位 */
+	{
+		B_WRITE = 0x1,		/* 写操作。将缓存中的信息写到硬盘上去 */
+		B_READ	= 0x2,		/* 读操作。从盘读取信息到缓存中 */
+		B_DONE	= 0x4,		/* I/O操作结束 */
+		B_ERROR	= 0x8,		/* I/O因出错而终止 */
+		B_BUSY	= 0x10,		/* 相应缓存正在使用中 */
+		B_WANTED = 0x20,	/* 有进程正在等待使用该buf管理的资源，清B_BUSY标志时，要唤醒这种进程 */
+		B_ASYNC	= 0x40,		/* 异步I/O，不需要等待其结束 */
+		B_DELWRI = 0x80		/* 延迟写，在相应缓存要移做他用时，再将其内容写到相应块设备上 */
+	};
+    bool Swap(int blkno, unsigned long addr, int count, enum Buf::BufFlag flag);
+	/* Swap I/O 用于进程图像在内存和盘交换区之间传输
+	 * blkno: 交换区中盘块号；addr:  进程图像(传送部分)内存起始地址；
+     * count: 进行传输字节数，byte为单位；传输方向flag: 内存->交换区 or 交换区->内存。 */
+bool BufferManager::Swap(int blkno, unsigned long addr, int count, enum Buf::BufFlag flag)
+{
+	User& u = Kernel::Instance().GetUser();
+
+	X86Assembly::CLI();
+
+	/* swbuf正在被其它进程使用，则睡眠等待 */
+	while ( this->SwBuf.b_flags & Buf::B_BUSY )
+	{
+		this->SwBuf.b_flags |= Buf::B_WANTED;
+		u.u_procp->Sleep((unsigned long)&SwBuf, ProcessManager::PSWP);
+	}
+
+	this->SwBuf.b_flags = Buf::B_BUSY | flag;
+	this->SwBuf.b_dev = DeviceManager::ROOTDEV;
+	this->SwBuf.b_wcount = count;
+	this->SwBuf.b_blkno = blkno;
+	/* b_addr指向要传输部分的内存首地址 */
+	this->SwBuf.b_addr = (unsigned char *)addr;
+	this->m_DeviceManager->GetBlockDevice(Utility::GetMajor(this->SwBuf.b_dev)).Strategy(&this->SwBuf);
+
+	/* 关中断进行B_DONE标志的检查 */
+	X86Assembly::CLI();
+	/* 这里Sleep()等同于同步I/O中IOWait()的效果 */
+	while ( (this->SwBuf.b_flags & Buf::B_DONE) == 0 )
+	{
+		u.u_procp->Sleep((unsigned long)&SwBuf, ProcessManager::PSWP);
+	}
+
+	/* 这里Wakeup()等同于Brelse()的效果 */
+	if ( this->SwBuf.b_flags & Buf::B_WANTED )
+	{
+		Kernel::Instance().GetProcessManager().WakeUpAll((unsigned long)&SwBuf);
+	}
+	X86Assembly::STI();
+	this->SwBuf.b_flags &= ~(Buf::B_BUSY | Buf::B_WANTED);
+
+	if ( this->SwBuf.b_flags & Buf::B_ERROR )
+	{
+		return false;
+	}
+	return true;
+}
+```
+- 一次和磁盘的交互都是512字节，因为一个盘块是512字节，因此count应当小于等于512字节
+### 发生内存交换的情况
+#### 当内存空间不足以装下所有就绪进程
+
+```c++
+	/* 
+	 * 进程图像内存和交换区之间的传送。如果有进程想要换入内存，而内存
+	 * 中无法找到能够容纳该进程的连续内存区，则依次将低优先权睡眠状态(SWAIT)-->
+	 * 暂停状态(SSTOP)-->高优先权睡眠状态(SSLEEP)-->就绪状态(SRUN)进程换出，
+	 * 直到腾出足够内存空间将想要换入的进程调入内存
+	 */
+	void Sched();
+    void ProcessManager::Sched()
+{
+	Process* pSelected;
+	User& u = Kernel::Instance().GetUser();
+	int seconds;
+	unsigned int size;
+	unsigned long desAddress;
+
+	/* 
+	 * 选择在交换区驻留时间最长，处于就绪状态的进程换入
+	 */
+	goto loop;
+
+sloop:
+	this->RunIn++;
+	u.u_procp->Sleep((unsigned long)&RunIn, ProcessManager::PSWP);
+
+loop:
+	X86Assembly::CLI();
+	seconds = -1;
+	for ( int i = 0; i < ProcessManager::NPROC; i++ )
+	{
+		if ( this->process[i].p_stat == Process::SRUN 
+        && (this->process[i].p_flag & Process::SLOAD) == 0 
+        && this->process[i].p_time > seconds )
+		{
+			pSelected = &(this->process[i]);
+			seconds = pSelected->p_time;
+		}
+	}
+
+	/* 如果没有符合条件的进程，0#进程睡眠等待有需要换入的进程 */
+	if ( -1 == seconds )
+	{
+		this->RunOut++;
+		u.u_procp->Sleep((unsigned long)&RunOut, ProcessManager::PSWP);
+		goto loop;
+	}
+
+	/* 如果有进程满足条件，需要换入，则检查是否有足够内存 */
+	X86Assembly::STI();
+	/* 计算进程换入需要的内存大小 */
+	size = pSelected->p_size;
+	/* 
+	 * 如果存在共享正文段，但是没有进程图像在内存中，引用该正文段的进程，
+	 * 即共享正文段不再内存中，换入时需要读入正文段在交换区中的副本
+	 */
+	if ( pSelected->p_textp != NULL && 0 == pSelected->p_textp->x_ccount )
+	{
+		size += pSelected->p_textp->x_size;
+	}
+	/* 如果内存分配成功，则进行实际换入操作 */
+	desAddress = Kernel::Instance().GetUserPageManager().AllocMemory(size);
+	if ( NULL != desAddress )
+	{
+		goto found2;
+	}
+
+	/*
+	 * 分配内存失败情况下，换出内存中进程，腾出空间。
+	 * 换出原则：从易到难；依次将低优先权睡眠状态(SWAIT)-->
+	 * 暂停状态(SSTOP)-->高优先权睡眠状态(SSLEEP)-->就绪状态(SRUN)进程换出。
+	 */
+	X86Assembly::CLI();
+	for ( int i = 0; i < ProcessManager::NPROC; i++ )
+	{
+
+		bool pFlagIsSLOAD = (this->process[i].p_flag & (int(Process::SSYS) | int(Process::SLOCK) | int(Process::SLOAD))) == int(Process::SLOAD);
+
+		bool statIsSWAITOrSSTOP = (this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP);
+
+		if (pFlagIsSLOAD && statIsSWAITOrSSTOP)
+		{
+			goto found1;
+		}
+	}
+
+	/* 
+	 * 在换出高优先权睡眠状态(SSLEEP)、就绪状态(SRUN)进程而腾出内存之前，
+	 * 检查待换入进程在交换区驻留时间是否已达到3秒，低于则不予换入
+	 */
+	if ( seconds < 3 )
+	{
+		goto sloop;
+	}
+
+	seconds = -1;
+	for ( int i = 0; i < ProcessManager::NPROC; i++ )
+	{
+
+		bool pFlagIsSLOAD = (this->process[i].p_flag & (int(Process::SSYS) | int(Process::SLOCK) | int(Process::SLOAD))) == int(Process::SLOAD);
+		bool pStatIsSWAITOrSSTOP = this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP;
+
+		if ( pFlagIsSLOAD && pStatIsSWAITOrSSTOP && pSelected->p_time > seconds ) {
+			pSelected = &(this->process[i]);
+			seconds = pSelected->p_time;
+		}
+	}
+
+	/* 如果要换出SSLEEP、SRUN状态进程，先检查该进程驻留内存时间是否超过2秒，否则不予换出 */
+	if ( seconds < 2 )
+	{
+		goto sloop;
+	}
+
+	/* 换出pSelected指向的被选中进程 */
+found1:
+	X86Assembly::STI();
+	pSelected->p_flag &= ~Process::SLOAD;
+	this->XSwap(pSelected, true, 0);
+	/* 腾出内存空间后再次尝试换入进程 */
+	goto loop;
+
+	/* 已经分配好足够的内存，进行实际的换入操作 */
+found2:
+	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
+	/* 
+	* 如果存在共享正文段，但是没有进程图像在内存中，引用该正文段的进程，
+	* 即共享正文段不再内存中，换入时需要读入正文段在交换区中的副本
+	*/
+	if ( pSelected->p_textp != NULL )
+	{
+		Text* pText = pSelected->p_textp;
+		if ( pText->x_ccount == 0 )
+		{
+			/* 因为共享正文段，和进程ppda、数据段、堆栈段在交换区中是分开存放的，所以先换入共享正文段 */
+			if ( bufMgr.Swap(pText->x_daddr, desAddress, pText->x_size, Buf::B_READ) == false )
+			{
+				goto err;
+			}
+			/* 共享正文段在内存中的起始地址 */
+			pText->x_caddr = desAddress;
+			desAddress += pText->x_size;
+		}
+		pText->x_ccount++;
+	}
+	/* 换入剩余部分图像：ppda、数据段、堆栈段 */
+	if ( bufMgr.Swap(pSelected->p_addr /* blkno */, desAddress, pSelected->p_size, Buf::B_READ) == false )
+	{
+		goto err;
+	}
+	Kernel::Instance().GetSwapperManager().FreeSwap(pSelected->p_size, pSelected->p_addr /* blkno */);
+	pSelected->p_addr = desAddress;
+	pSelected->p_flag |= Process::SLOAD;
+	pSelected->p_time = 0;
+	goto loop;
+
+err:
+	Utility::Panic("Swap Error");
+}
+```
+- 每次时钟中断，p_time 都会加一，这样sched会按照p_time从小到大的顺序一次把就绪进程移动到磁盘交换区上。
+#### 进程图像的换入
+- 如果有代码段，判断代码段是否需要进入内存，如果需要进入内存，要调用swap函数，并把x_ccount++
+- 随后释放磁盘上进程图像可交换部分所占的空间，把进程图像也搬到内存当中
+- 修改换入进程的p_addr p_flag 加上SLOAD 并设置p_time =0  
+- 结束之后，代码段的x_daddr会保留，x_caddr被正确赋值能够在内存上找到代码段。
+
+0# 进程负责一个死循环去维护上面的进程保证他们能够不停的执行。只要0#进程在台上，就会一直去查找是否有就绪的进程可以换入，如果没有，那么去sleep(RunOut,-100)，等随后由于这个原因而唤醒。在setRun函数当中，一个进程发现自己的图像不再内存上，会唤醒0#进程来换入自己的进程。
+
+#### 换入进程发现没有多余的空间
+原则：
+- 无SSYS 和 SLOCK 标志位
+- 先换出低睡进程 SWAIT
+- 对于所有的高睡进程，以及就绪进程，把这两类进程中最久没有被调用的进程换出。 SLEEP\|SRUN
+
+```c++
+	/*
+	 * 将进程从内存换出至磁盘交换区上
+	 * pProcess: 指向要换出的进程
+	 * bFreeMemory: 是否释放进程图像占据的内存
+	 * size: 除共享正文段外，进程可交换部分图像长度；参数size为0时，直接使用p_size
+	 */
+	void XSwap(Process* pProcess, bool bFreeMemory, int size);
+void ProcessManager::XSwap( Process* pProcess, bool bFreeMemory, int size )
+{
+	if ( 0 == size)
+	{
+		size = pProcess->p_size;
+	}
+
+	/* blkno记录分配到的交换区起始扇区号 */
+	int blkno = Kernel::Instance().GetSwapperManager().AllocSwap(pProcess->p_size);
+	if ( 0 == blkno )
+	{
+		Utility::Panic("Out of Swapper Space");
+	}
+	/* 递减进程图像在内存中，且引用该正文段的进程数 */
+	if ( pProcess->p_textp != NULL )
+	{
+		pProcess->p_textp->XccDec();
+	}
+	/* 上锁，防止同一进程图像被重复换出 */
+	pProcess->p_flag |= Process::SLOCK;
+	if ( false == Kernel::Instance().GetBufferManager().Swap(blkno, pProcess->p_addr, size, Buf::B_WRITE) )
+	{
+		Utility::Panic("Swap I/O Error");
+	}
+	if ( bFreeMemory )
+	{
+		Kernel::Instance().GetUserPageManager().FreeMemory(size, pProcess->p_addr);
+	}
+	/* 把进程图像在交换区起始扇区号记录在p_addr中，SLOAD是0、进程是盘交换区上的进程了 */
+	pProcess->p_addr = blkno;
+	pProcess->p_flag &= ~(Process::SLOAD | Process::SLOCK);
+	/* 最近一次被换入或换出以来，在内出或交换区驻留的时间长度清零 */
+	pProcess->p_time = 0;
+
+	if ( this->RunOut )
+	{
+		this->RunOut = 0;
+		Kernel::Instance().GetProcessManager().WakeUpAll((unsigned long)&RunOut);
+	}
+}
+```
+- 减少x_ccount的值
+- 上锁防止被重复换出
+- 运行到发现没有进程可以调出，sleep(&runin,-100); 其他进程再sleep函数的时候，就要让0#进程试试能不能把这个进程去换出，这个时候要求换出的进程p_time值要大于2，换入的进程p_time值要大于3
+#### 内存空间不足以存放新进程
+
+```c++
+//这段代码来自于Newproc
+	if ( desAddress == 0 ) /* 内存不够，需要swap */
+	{
+		current->p_stat = Process::SIDL;
+		/* 子进程p_addr指向父进程图像，因为子进程换出至交换区需要以父进程图像为蓝本 */
+		child->p_addr = current->p_addr;
+		SaveU(u.u_ssav);
+		this->XSwap(child, false, 0);
+		child->p_flag |= Process::SSWAP;
+		current->p_stat = Process::SRUN;
+	}
+```
+- 父进程执行Xswap，二次保存的ssav的结果，栈顶是newproc指针的结果。于是子进程应该使用ssav的newproc栈帧回到自己的执行状态。
+- 子进程有SSWAP标志位，要用ssav如替换rsav把无用的核心栈栈帧刷掉。
+#### 内存空间不足以扩展自己的图像
+```c++
+void Process::Expand(unsigned int newSize)
+{
+	UserPageManager& userPgMgr = Kernel::Instance().GetUserPageManager();
+	ProcessManager& procMgr = Kernel::Instance().GetProcessManager();
+	User& u = Kernel::Instance().GetUser();
+	Process* pProcess = u.u_procp;
+
+	unsigned int oldSize = pProcess->p_size;
+	p_size = newSize;
+	unsigned long oldAddress = pProcess->p_addr;
+	unsigned long newAddress;
+
+	/* 如果进程图像缩小，则释放多余的内存 */
+	if ( oldSize >= newSize )
+	{
+		userPgMgr.FreeMemory(oldSize - newSize, oldAddress + newSize);
+		return;
+	}
+
+	/* 进程图像扩大，需要寻找一块大小newSize的连续内存区 */
+	SaveU(u.u_rsav);
+	newAddress = userPgMgr.AllocMemory(newSize);
+	/* 分配内存失败，将进程暂时换出到交换区上 */
+	if ( NULL == newAddress )
+	{
+		SaveU(u.u_ssav);
+		procMgr.XSwap(pProcess, true, oldSize);
+		pProcess->p_flag |= Process::SSWAP;
+		procMgr.Swtch();
+		/* no return */
+	}
+	/* 分配内存成功，将进程图像拷贝到新内存区，然后跳转到新内存区继续运行 */
+	pProcess->p_addr = newAddress;
+	for ( unsigned int i = 0; i < oldSize; i++ )
+	{
+		Utility::CopySeg(oldAddress + i, newAddress + i);
+	}
+
+	/* 释放原来占用的内存区 */
+	userPgMgr.FreeMemory(oldSize, oldAddress);
+	
+	X86Assembly::CLI();
+	SwtchUStruct(pProcess);
+	RetU();
+	X86Assembly::STI();
+
+	u.u_MemoryDescriptor.MapToPageTable();
+}
+```
+发现图像空间不够的时候，给自己一个SSWAP标志位，把自己的整体和自己的扩展部分当成一个整体放在盘交换区上，像是一个刚刚创建的子进程一样归来。
+### 神秘的0号进程
+可以再睡眠中参与swtch函数的调度，梦游说是.
+然而，中间这一棒只能由0号进程来完成，只有它能够自然醒。
+
 # 6 设备管理
 
 ## 6.1 硬件
@@ -1643,7 +1923,7 @@ void ATABlockDevice::Start()
 
 ### 6.4.3 缓存的竞争使用
 
-- 进程有三种情况会谁在缓存上
+- 进程有三种情况会睡在缓存上
 	- B_BUZY进程，加上B_WANTED
 	- 因为等待IO入睡的进程，为进程添加B_BUZY
 		睡眠原因一致，优先级一致。如果是第一种进程起来了，发现不是B_BUZY的添加者，无法清除B_BUZY标志，接着睡
@@ -2547,7 +2827,7 @@ int Inode::Bmap(int lbn)
 在整个系统调用的过程中，BMap有可能已经启动了磁盘的IO操作。
 Bread 当中利用[前文](#641-unix块设备的读过程)所述缓存机制，完成一系列读取
 
-#### 如何完成文件大小到存储块的对应
+##### 如何完成文件大小到存储块的对应
 
 ```c++
 lbn = bn = u.u_IOParam.m_Offset / Inode::BLOCK_SIZE;
@@ -2566,4 +2846,379 @@ nbytes = Utility::Min(Inode::BLOCK_SIZE - offset /* 块内有效字节数 */, u.
 读取就是很自然的读取，只不过在编程上想要减少代码异味是一件很困难的事情。应当如何获取新的起始块号和读取数量是一件重要的事情。
 
 此外，系统调用返回的是本次读取的字节的数目，如果和计划中读取的字节数相当则表示本次的读取没有问题，否则就是有问题，就要查看对应的错误信息（在哪呢？）
+
+#### 7.5.2 Write
+
+- 用和read一样的操作获取块号
+- 如果写一个满块，那就不读了，直接写 ，否则要先读再写。
+- 如果m_Offset 为下一块的首地址，也就是写了完整的一块的情况，启动异步写（要io）
+- 如果m_Offset 为还在当前逻辑块，那就没有写满 ，启动一次延迟写（不io）
+- 如果造成了文件的长度增加，要增加isize的值
+- 如果导致文件的写操作需要增加一个盘块的话，就会在下一节考虑这个问题。
+
+### 7.6 文件存储空间管理
+
+#### 7.6.1 管理方法
+- 位图法：采用一个二进制位来表达一个盘块是否被占用，1表示已占用，0表示未占用。
+- 空白文件法：将所有的盘空闲区组织成一个或多个空白文件。使用连续结构或者链接结构的方式组织这些空白文件。
+	- 对于连续结构：空白文件会占用很多目录项。
+	- 对于链接结构：如果链表当中的某一个节点出现了问题，整个系统就会崩溃
+
+#### 7.6.2 成组链接法
+
+先分组（连续） 再链接（链表）
+```c++
+class SuperBlock {
+	int		s_fsize;		/* 盘块总数 */
+	int		s_nfree;		/* 直接管理的空闲盘块数量 */
+	int		s_free[100];	/* 直接管理的空闲盘块索引表 */
+	int		s_flock;		/* 封锁空闲盘块索引表标志 进程互斥*/ 
+};
+
+```
+
+隐式链接：下一个盘块的分组只有前一个盘块才知道。
+
+按照100 分组，最后一个分组用99 个分组表示最后一个分组。分到最后会有一个零头组，由superblock管理那个不足100的零头数组，记录在数组（s_free[100]）中。每个分组首盘块的开始101个字存放前一个分组的索引
+也就是用6,100,100...100,99这样的方式完成了组织。其中前一个分组的第一个盘块号记录了下一个分组的空闲盘块号有哪些，并在第0个元素上标注了下一个盘块到底有多少个空闲分区。
+![alt text](../images/1970-01-01-os-SuperBlock.png)
+
+- 为什么s_free是100 而不是101呢？ 因为他不需要知道自己的大小，只需要知道自己拿到了哪些盘块就好了，其中的第一个盘块正好是下一个分组的分组名单。
+
+一直装，装到满，就放出去。用完了就抓一个回来。
+
+新的分组的制作发生在上一个分组溢出一个的时候，因为需要空间来存放上一个分组的盘块号。
+
+系统初起读取SuperBlock就是在完成文件的挂载。
+
+一旦拿到了盘块之后，内核就分配一块缓存用了读写建立对应的关联。在新的盘块交给进程的时候，文件增加的一次写操作需要一个干净的缓存。
+
+#### 7.6.3
+
+
+BMap函数发现文件逻辑块号增加导致需要增加一个block。
+```c++
+//BMap函数内容
+/* 
+		 * 如果该逻辑块号还没有相应的物理盘块号与之对应，则分配一个物理块。
+		 * 这通常发生在对文件的写入，当写入位置超出文件大小，即对当前
+		 * 文件进行扩充写入，就需要分配额外的磁盘块，并为之建立逻辑块号
+		 * 与物理盘块号之间的映射。
+		 */
+		if( phyBlkno == 0 && (pFirstBuf = fileSys.Alloc(this->i_dev)) != NULL )
+		{
+			/* 
+			 * 因为后面很可能马上还要用到此处新分配的数据块，所以不急于立刻输出到
+			 * 磁盘上；而是将缓存标记为延迟写方式，这样可以减少系统的I/O操作。
+			 */
+			bufMgr.Bdwrite(pFirstBuf);
+			phyBlkno = pFirstBuf->b_blkno;
+			/* 将逻辑块号lbn映射到物理盘块号phyBlkno */
+			this->i_addr[lbn] = phyBlkno;
+			this->i_flag |= Inode::IUPD;
+		}
+```
+事实上这里只拿到了一块干净的缓存，但是盘块还是脏的，事实上没有必要立刻清洗盘块，因为随后延迟写完成之后再写入的时候一定会把对应的盘块写成自己想要的样子。如果只是拿到了这块缓存，那也无所谓，由于加了延迟写的标志，后续还会写入盘块。
+
+后续大型文件和巨型文件同样满足了相同的逻辑。
+
+- inode区有多少个inode(DiskInode)？ $(1023-202+1) \times 8 = 6488$ 最多也就有这么多个文件
+- 有可能inode用完了，文件数据区还有空
+- 也有可能inode没用完，但是文件数据区已经满了
+
+### 7.7 文件系统的目录管理
+
+目的：实现按名存取，允许文件重名。
+FCB：文件控制块，记录文件的相关信息，包括文件名、文件类型、文件大小、文件物理地址等。
+- 文件名、文件物理位置（设备名、起始盘号、长度等用于文件逻辑到物理地址变换）等
+- 文件主、核准用户及一般用户对文件的存取权限等
+- 建立及上次修改时间、当前打开该文件的进程数、在内存中是否修改等
+
+事实上，FCB的集合就是一个文件目录，一个FCB就是一个目录项。
+
+#### 7.7.1 目录项结构
+
+- 线性结构：查找速度慢
+- 二级目录：按照用户分级，缺乏灵活性
+- 树状目录结构：查找效率高。广义的文件名实际上是文件的路径名。所有的进程都可以设置自己的当前目录。linux允许勾连。
+
+引入inode节点可以优化目录结构，目录项里面可以只放一个正整数指向inode。unix当中文件名最长为28个字节。
+```c++
+class DirectoryEntry
+{
+	/* static members */
+public:
+	static const int DIRSIZ = 28;	/* 目录项中路径部分的最大字符串长度 */
+
+	/* Functions */
+public:
+	/* Constructors */
+	DirectoryEntry();
+	/* Destructors */
+	~DirectoryEntry();
+
+	/* Members */
+public:
+	int m_ino;		/* 目录项中Inode编号部分 */
+	char m_name[DIRSIZ];	/* 目录项中路径名部分 */
+};
+
+#endif
+```
+
+目录也是在文件数据区当中的文件，目录文件的用处就是一个个目录项。每一个目录文件在inode节点当中有一个编号。512/32=16 也就是每16个目录项占据一个盘块。
+
+```c++
+//Class Inode 当中用于区分一个盘块用于目录还是文件的标志位
+	static const unsigned int IALLOC = 0x8000;		/* 文件被使用 */
+	static const unsigned int IFMT = 0x6000;		/* 文件类型掩码 */
+	static const unsigned int IFDIR = 0x4000;		/* 文件类型：目录文件 */
+	static const unsigned int IFCHR = 0x2000;		/* 字符设备特殊类型文件 */
+	static const unsigned int IFBLK = 0x6000;		/* 块设备特殊类型文件，为0表示常规数据文件 */
+		unsigned int i_flag;	/* 状态的标志位，定义见enum INodeFlag */
+
+
+```
+
+目录树上的每一个节点都是一个文件。如果这是一个目录文件的话，它的Inode会存储对应的目录项的名称和Inode节点位置。
+
+#### 7.7.2 NameI 按名查找
+
+```c++
+/* 返回NULL表示目录搜索失败，否则是根指针，指向文件的内存打开i节点 ，上锁的内存i节点  */
+Inode* FileManager::NameI( char (*func)(), enum DirectorySearchMode mode )
+{
+	Inode* pInode;
+	Buf* pBuf;
+	char curchar;
+	char* pChar;
+	int freeEntryOffset;	/* 以创建文件模式搜索目录时，记录空闲目录项的偏移量 */
+	User& u = Kernel::Instance().GetUser();
+	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
+
+	/* 
+	 * 如果该路径是'/'开头的，从根目录开始搜索，
+	 * 否则从进程当前工作目录开始搜索。
+	 */
+	pInode = u.u_cdir;
+	if ( '/' == (curchar = (*func)()) )
+	{
+		pInode = this->rootDirInode;
+	}
+
+	/* 检查该Inode是否正在被使用，以及保证在整个目录搜索过程中该Inode不被释放 */
+	this->m_InodeTable->IGet(pInode->i_dev, pInode->i_number);
+
+	/* 允许出现////a//b 这种路径 这种路径等价于/a/b */
+	while ( '/' == curchar )
+	{
+		curchar = (*func)();
+	}
+	/* 如果试图更改和删除当前目录文件则出错 */
+	if ( '\0' == curchar && mode != FileManager::OPEN )
+	{
+		u.u_error = User::ENOENT;
+		goto out;
+	}
+
+	/* 外层循环每次处理pathname中一段路径分量 */
+	while (true)
+	{
+		/* 如果出错则释放当前搜索到的目录文件Inode，并退出 */
+		if ( u.u_error != User::NOERROR )
+		{
+			break;	/* goto out; */
+		}
+
+		/* 整个路径搜索完毕，返回相应Inode指针。目录搜索成功返回。 */
+		if ( '\0' == curchar )
+		{
+			return pInode;
+		}
+
+		/* 如果要进行搜索的不是目录文件，释放相关Inode资源则退出 */
+		if ( (pInode->i_mode & Inode::IFMT) != Inode::IFDIR )
+		{
+			u.u_error = User::ENOTDIR;
+			break;	/* goto out; */
+		}
+
+		/* 进行目录搜索权限检查,IEXEC在目录文件中表示搜索权限 */
+		if ( this->Access(pInode, Inode::IEXEC) )
+		{
+			u.u_error = User::EACCES;
+			break;	/* 不具备目录搜索权限，goto out; */
+		}
+
+		/* 
+		 * 将Pathname中当前准备进行匹配的路径分量拷贝到u.u_dbuf[]中，
+		 * 便于和目录项进行比较。
+		 */
+		pChar = &(u.u_dbuf[0]);
+		while ( '/' != curchar && '\0' != curchar && u.u_error == User::NOERROR )
+		{
+			if ( pChar < &(u.u_dbuf[DirectoryEntry::DIRSIZ]) )
+			{
+				*pChar = curchar;
+				pChar++;
+			}
+			curchar = (*func)();
+		}
+		/* 将u_dbuf剩余的部分填充为'\0' */
+		while ( pChar < &(u.u_dbuf[DirectoryEntry::DIRSIZ]) )
+		{
+			*pChar = '\0';
+			pChar++;
+		}
+
+		/* 允许出现////a//b 这种路径 这种路径等价于/a/b */
+		while ( '/' == curchar )
+		{
+			curchar = (*func)();
+		}
+
+		if ( u.u_error != User::NOERROR )
+		{
+			break; /* goto out; */
+		}
+
+		/* 内层循环部分对于u.u_dbuf[]中的路径名分量，逐个搜寻匹配的目录项 */
+		u.u_IOParam.m_Offset = 0;
+		/* 设置为目录项个数 ，含空白的目录项*/
+		u.u_IOParam.m_Count = pInode->i_size / (DirectoryEntry::DIRSIZ + 4);
+		freeEntryOffset = 0;
+		pBuf = NULL;
+
+		while (true)
+		{
+			/* 对目录项已经搜索完毕 */
+			if ( 0 == u.u_IOParam.m_Count )
+			{
+				if ( NULL != pBuf )
+				{
+					bufMgr.Brelse(pBuf);
+				}
+				/* 如果是创建新文件 */
+				if ( FileManager::CREATE == mode && curchar == '\0' )
+				{
+					/* 判断该目录是否可写 */
+					if ( this->Access(pInode, Inode::IWRITE) )
+					{
+						u.u_error = User::EACCES;
+						goto out;	/* Failed */
+					}
+
+					/* 将父目录Inode指针保存起来，以后写目录项WriteDir()函数会用到 */
+					u.u_pdir = pInode;
+
+					if ( freeEntryOffset )	/* 此变量存放了空闲目录项位于目录文件中的偏移量 */
+					{
+						/* 将空闲目录项偏移量存入u区中，写目录项WriteDir()会用到 */
+						u.u_IOParam.m_Offset = freeEntryOffset - (DirectoryEntry::DIRSIZ + 4);
+					}
+					else  /*问题：为何if分支没有置IUPD标志？  这是因为文件的长度没有变呀*/
+					{
+						pInode->i_flag |= Inode::IUPD;
+					}
+					/* 找到可以写入的空闲目录项位置，NameI()函数返回 */
+					return NULL;
+				}
+				
+				/* 目录项搜索完毕而没有找到匹配项，释放相关Inode资源，并推出 */
+				u.u_error = User::ENOENT;
+				goto out;
+			}
+
+			/* 已读完目录文件的当前盘块，需要读入下一目录项数据盘块 */
+			if ( 0 == u.u_IOParam.m_Offset % Inode::BLOCK_SIZE )
+			{
+				if ( NULL != pBuf )
+				{
+					bufMgr.Brelse(pBuf);
+				}
+				/* 计算要读的物理盘块号 */
+				int phyBlkno = pInode->Bmap(u.u_IOParam.m_Offset / Inode::BLOCK_SIZE );
+				pBuf = bufMgr.Bread(pInode->i_dev, phyBlkno );
+			}
+
+			/* 没有读完当前目录项盘块，则读取下一目录项至u.u_dent */
+			int* src = (int *)(pBuf->b_addr + (u.u_IOParam.m_Offset % Inode::BLOCK_SIZE));
+			Utility::DWordCopy( src, (int *)&u.u_dent, sizeof(DirectoryEntry)/sizeof(int) );
+
+			u.u_IOParam.m_Offset += (DirectoryEntry::DIRSIZ + 4);
+			u.u_IOParam.m_Count--;
+
+			/* 如果是空闲目录项，记录该项位于目录文件中偏移量 */
+			if ( 0 == u.u_dent.m_ino )
+			{
+				if ( 0 == freeEntryOffset )
+				{
+					freeEntryOffset = u.u_IOParam.m_Offset;
+				}
+				/* 跳过空闲目录项，继续比较下一目录项 */
+				continue;
+			}
+
+			int i;
+			for ( i = 0; i < DirectoryEntry::DIRSIZ; i++ )
+			{
+				if ( u.u_dbuf[i] != u.u_dent.m_name[i] )
+				{
+					break;	/* 匹配至某一字符不符，跳出for循环 */
+				}
+			}
+
+			if( i < DirectoryEntry::DIRSIZ )
+			{
+				/* 不是要搜索的目录项，继续匹配下一目录项 */
+				continue;
+			}
+			else
+			{
+				/* 目录项匹配成功，回到外层While(true)循环 */
+				break;
+			}
+		}
+
+		/* 
+		 * 从内层目录项匹配循环跳至此处，说明pathname中
+		 * 当前路径分量匹配成功了，还需匹配pathname中下一路径
+		 * 分量，直至遇到'\0'结束。
+		 */
+		if ( NULL != pBuf )
+		{
+			bufMgr.Brelse(pBuf);
+		}
+
+		/* 如果是删除操作，则返回父目录Inode，而要删除文件的Inode号在u.u_dent.m_ino中 */
+		if ( FileManager::DELETE == mode && '\0' == curchar )
+		{
+			/* 如果对父目录没有写的权限 */
+			if ( this->Access(pInode, Inode::IWRITE) )
+			{
+				u.u_error = User::EACCES;
+				break;	/* goto out; */
+			}
+			return pInode;
+		}
+
+		/* 
+		 * 匹配目录项成功，则释放当前目录Inode，根据匹配成功的
+		 * 目录项m_ino字段获取相应下一级目录或文件的Inode。
+		 */
+		short dev = pInode->i_dev;
+		this->m_InodeTable->IPut(pInode);
+		pInode = this->m_InodeTable->IGet(dev, u.u_dent.m_ino);
+		/* 回到外层While(true)循环，继续匹配Pathname中下一路径分量 */
+
+		if ( NULL == pInode )	/* 获取失败 */
+		{
+			return NULL;
+		}
+	}
+out:
+	this->m_InodeTable->IPut(pInode);
+	return NULL;
+}
+```
 
