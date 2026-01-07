@@ -523,6 +523,7 @@ nav {
   position: fixed;
   z-index: 4;
   padding: 60px 20px 0 20px;
+  overflow-y: auto; // Enable vertical scrolling when content overflows
 
   &:before{
     content:"目录";
@@ -536,6 +537,24 @@ nav {
 
   li:before{
     content:"";
+  }
+
+  // Custom scrollbar styling
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: $background-color;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: $oc-gray-3;
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: $oc-gray-5;
   }
 
   @include mobile{
