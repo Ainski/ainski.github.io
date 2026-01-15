@@ -171,7 +171,7 @@ int ProcessManager::Swtch()
 因此p_pri重算的过程中，不会重算核心态就绪的p_pri值，因为他们是人工设置得来的。而用户态就绪的是计算而来的。
 
 - 由于系统调用睡眠的进程，它最近一次上台的机会是什么？
- 
+
  当前cpu上的运行进程最近的一次例行调度。
 
 ### schedule 函数
@@ -463,7 +463,36 @@ int ProcessManager::NewProc()
 }
 
 ```
-父进程，从这里返回的值为0，子进程，利用Swtch函数的返回值1。这样，父子进程就进入了不同的状态。父子进程上返回地址都在newproc当中，但是他们带回来的值是不一样的。
+父进程，从这里返回的值为0，子进程，利用Swtch函数的返回值1。虽然顶部栈帧为newproc栈帧，但是随后子进程作为swtch函数当中的第三棒被选中的时候，会把这个栈帧作为swtch函数的栈帧调用，这样它的返回值就是1。newproc的返回值就是1，fork系统调用的返回值就是0。
+
+如果内存空间不够，子进程创建在了磁盘上那么Swtch函数当中检查二次保存现场的意义就在于此，子进程直接忽略掉上面的所有栈帧，只留下swtch栈帧，从swtch栈帧开始逐级返回，这样返回的值就是1。
+
+```c++
+	//以下内容来自于swtch函数
+	/*
+	 * If the new process paused because it was
+	 * swapped out, set the stack level to the last call
+	 * to savu(u_ssav).  This means that the return
+	 * which is executed immediately after the call to aretu
+	 * actually returns from the last routine which did
+	 * the savu.
+	 *
+	 * You are not expected to understand this.
+	 */
+	if ( newu.u_procp->p_flag & Process::SSWAP )
+	{
+		newu.u_procp->p_flag &= ~Process::SSWAP;
+		aRetU(newu.u_ssav);
+	}
+	
+	/* 
+	 * 被fork出的进程在上台之前会在被调度上台时返回1，
+	 * 并同时返回到NewProc()执行的地址
+	 */
+	return 1;
+```
+
+
 
 #### fork系统调用
 ```c++
@@ -514,9 +543,9 @@ void ProcessManager::Fork()
 	return;
 }
 ```
-应当注意的是，在一个进程刚刚创建的时候p_pri=0。然而，在fork返回之后，由于系统调用结束会产生一个setpri的pri值重算。这样当子进程被重新加入就绪队列之后，父子进程上台机会是相等的。
+应当注意的是，在一个进程刚刚创建的时候p_pri=0。然而，在fork返回之后，由于系统调用结束会产生一个setpri的pri值重算。这样当子进程被重新加入就绪队列之后，父子进程上台机会是相等的。正是利用前面两者不同的栈帧，子进程上台后，以原有的newproc执行的栈帧返回1。
 ### 4.3.2 进程的终止
-父进程无法设置好正确的时钟去等待子进程的结束时间。因此，父进程会等到子进程活过来再把自己杀掉。父进程会睡在子进程未完成这个睡眠的原因上。
+父进程无法设置好正确的时钟去等待子进程的结束时间。因此，父进程会等到子进程活过来再接着干该干的事情。父进程会睡在子进程未完成这个睡眠的原因上。
 ```c++
 int wait(int* status)	/* 获取子进程返回的Return Code */
 {
@@ -730,7 +759,7 @@ void ProcessManager::Wait()
 ```c++
 while(lock==1)
 	;
-lock =1 ;
+lock = 1 ;
 //使用临界资源
 lock = 0；
 ```
@@ -863,6 +892,7 @@ consumer() {
 #### 理发师问题
 ![alt text](../images/1970-01-01-box.png)
 开关被拨亮了意味着有人来找，拨关意味着服务完成。
+
 ```c++
 #define CHAIRS 5
 
@@ -1378,7 +1408,7 @@ void Process::Expand(unsigned int newSize)
 
 中断，驱动，I/O接口
 
-控制层由下到上依次位：硬件，中断处理程序，设备驱动程序，设备无关软件，用户进程。
+控制层由下到上依次为：硬件，中断处理程序，设备驱动程序，设备无关软件，用户进程。
 ### 5.2.1 设备驱动程序
 
 - 接收上层软件发来的抽象命令和参数，转换为具体I/O操作要求；
@@ -1586,13 +1616,15 @@ public:
 ```mermaid
 flowchart TD
 A[try to get a buffer] -->B{可以重用吗？}
-B --> |yes|C{是否读取完成？B_DONE}
+B --> |yes| C{是否读取完成？B_DONE}
 C --> |yes| D[直接使用]
 C --> |no| E[睡眠等待,给B_Wanted标志位增加]
 B --> |no| F[找最久没有被使用的缓存]
 B --> |no| G[为了io操作管理的方便]
 
 ```
+
+
 
 在`找最久没有被使用的缓存`这一部分，每个设备的缓存排列为一个fifo队列，寻找缓存的时候，先从本设备的队列当中找重用，找不到再从自由队首分配。
 对于一块缓存，它在被使用之后，会在设备队列当中和自由队列当中同时存在，如果被使用，那么回到设备队列当中，如果排到自由队列队首，那么给其他人使用。
@@ -1932,7 +1964,7 @@ void ATABlockDevice::Start()
 	- 因为等待IO入睡的进程，为进程添加B_BUZY
 		睡眠原因一致，优先级一致。如果是第一种进程起来了，发现不是B_BUZY的添加者，无法清除B_BUZY标志，接着睡
 	- 获取新缓存失败的进程
-![alt text](../images/1970-01-01-os-block.png)
+	![alt text](../images/1970-01-01-os-block.png)
 
 # 6 文件系统
 文件是具有文件名的一组相关信息的集合。
