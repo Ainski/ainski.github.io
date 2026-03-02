@@ -14,7 +14,7 @@ toc : true
 ### 无穷自动机
 - $\delta$: $Q \times \Sigma_\epsilon \to P(Q)$  
 - 幂级  
-- 克林闭包： $\Sigma^*=U_{i=1}^{\infty}\Sigma^i$ 
+- xxxxxxxxxx class Solution {public:    inline int tonum(char c){        switch(c){            case 'I': return 1;            case 'V':return 5;            case 'X':return 10;            case 'L':return 50;            case 'C':return 100;            case 'D': return 500;            case 'M':return 1000;            default :return 0;        }    }    int romanToInt(string s) {        int res=0;        int last=0;        for(auto i : s){            int tmp=tonum(i);            res+=tmp;            if (tmp>last) res-=2*last;            last=tmp;        }        return res;            }};c++
 ### pump 崩？
 ```plantuml
 @startuml

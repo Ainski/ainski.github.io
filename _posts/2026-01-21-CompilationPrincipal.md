@@ -23,8 +23,6 @@ author: Ainski
 
 #### 2.1.1.1 字母表
 
-
-
 1. **什么是高级语言** ：任何语言程序都可看成是一定字符集（字母表）上的一字符串。
 
 2. 对于下面这样一个运算式
@@ -165,7 +163,7 @@ $f(i, w) = (\text{前 } i \text{ 个字符中操作符的个数}) - (\text{前 }
 
 实际上这个语言很像那个switch-case 分支语句，针对每一个条件给出一个输出。很适合写决策树噢！！！
 
-```java
+```prolog
 % 规则：fibonacci(N, F) - N 是位置，F 是对应的斐波那契数
 fibonacci(1, 1).
 fibonacci(2, 1).
@@ -532,14 +530,18 @@ expr : expr MUL expr
 // 显然的， 如果不出现这样的递归调用的话， 将会产生一个有穷语言
 ID : ('_' |LETTER)('_' | LETTER | DIGIT )*;
 
-INT : '0' | [1-9]DIGIT *;
+INT : '0' | ('+' | '-' )? [1-9]DIGIT *;
+//                      ^ 此处问号表示前面的符号可有可无， 也就是说整数可以以正负号开头， 也可以没有符号开头
 
 WS : [ \t\r\n]+ -> skip; //white space
 
 DOCS_COMMENT : '/**' .*? '\n' -> skip; // documentation comment
 
-SL_COMMENT : '//' .*? '\n' -> skip; // single line comment  ? 代表贪婪匹配后面的内容
-                 // ^ ? 起到了同样的作用
+SL_COMMENT : '//' .*? '\n' -> skip; // single line comment
+                 // ^ ? 代表贪婪匹配后面的内容，也就是遇到第一个后面的内容就结束
+
+SL_COMMENT_2 : '//' (~[\n]*) '\n' -> skip; // single line comment alternative
+                 //  ^ ~ 表示匹配除了\n 以外的所有内容，直到遇到 \n
 ML_COMMENT : '/*' .*? '*/' -> skip; // multi-line comment
                  // ^ ? 起到了同样的作用
 
@@ -549,7 +551,13 @@ fragment DIGIT : [0-9] ;
 
 ```
 
+语法规则以小写字母开头， 词法规则以大写字母开头
 
+antlr4 有如下几种特殊的匹配规则：
+
+- 最前优先匹配——更靠前的语法规则会被匹配
+- 最长优先匹配——更长的词法规则会被匹配
+- 非贪婪匹配——（）？？ （） * ？ ，（）+ ？
 
 测试内容：
 
@@ -578,3 +586,75 @@ print a;
 
 
 
+### 3.4.2  超前搜索
+
+所谓超前搜索，就是在文档中找到匹配当前**词法单元**最长的字符串
+
+### 3.4.3 LEX 的实现
+
+在课程中遇到了一个java关键字 `final` 。这里特别说明
+
+
+
+|    特性    |                          C++ const                           |                        C++ constexpr                         |                    Java final（对比参考）                    |
+| :--------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
+|  核心语义  |               只读（运行时 / 编译期常量均可）                |                编译期常量（必须编译期确定值）                |            不可重赋值（编译期 / 运行时常量均可）             |
+| 初始化要求 | 可以用运行时的值初始化（如函数返回值）。例：`int getNum() { return 10; }``const int a = getNum(); // 合法，运行时常量` | 必须用编译期可计算的值初始化，不能用运行时数据。例：`constexpr int a = getNum(); // 编译错误（getNum 不是 constexpr 函数）``constexpr int b = 10 + 20; // 合法（编译期计算）` | 可以用运行时的值初始化（如构造器中赋值）。例：`final int a = new Random().nextInt(); // 合法` |
+|  适用场景  |         修饰运行时只读的变量（如函数参数、类成员）。         |      修饰必须编译期确定的常量（如数组大小、模板参数）。      | 修饰运行时不可重赋值的变量，仅 `static final 基本类型+字面量` 是编译期常量。 |
+
+```java
+  public Token(TokenType type, String text) {
+    this.type = type;
+    this.text = text;
+  }
+```
+
+这里体现了前文所述，一个词法单元可以解析为 类型和 内容
+
+类型大致如下 
+
+```java
+package dragon;
+
+/**
+ * Types of tokens
+ * Grouped by hardness of recognition
+ */
+public enum TokenType {
+  // Group 0
+  EOF,  // end of file
+  UNKNOWN,  // for error
+
+  // Group 1
+  // lookhead = 1 (LA(1))
+  DOT, POS, NEG,
+  IF, ELSE,
+  ID,
+  INT,
+  WS,
+
+  // Group 2
+  // =, <>, <, <=, >, >=
+  // LA(2) lookahead = 2 2位超前搜索
+  EQ, NE, LT, LE, GT, GE,
+
+  // Group 3
+  // arbitrary LA 需要向前看任意长度的文本
+  REAL,// integer double
+  SCI,// scientific notation 科学计数法
+}
+```
+
+对于这样一个语法单元`123Ex`， 前面 读取到E之后 猜测 这是一个词法单元，但是这是一个错误的猜测，就要回退到上一个正确的地方。
+
+
+
+一个正确的lexer 应该做到 **记录来时最长匹配，无路可走便回头** 
+
+####  3.4.3.1int id ws
+
+对于这三类词法单元，需要不断重复直到遇到第一个错误
+
+#### 3.4.3.2 运算符号
+
+需要一个 有限DFA便可识别出所有需要的内容。
