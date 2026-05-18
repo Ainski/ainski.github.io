@@ -2,7 +2,7 @@
 layout: post
 title: "编译原理"
 date:   2026-01-21
-tags: [学校课程复习]
+tags: [学校课程复习,编译原理]
 comments: true
 toc: true
 author: Ainski
@@ -651,10 +651,80 @@ public enum TokenType {
 
 一个正确的lexer 应该做到 **记录来时最长匹配，无路可走便回头** 
 
-####  3.4.3.1int id ws
+####  3.4.3.1 int id ws
 
 对于这三类词法单元，需要不断重复直到遇到第一个错误
 
 #### 3.4.3.2 运算符号
 
 需要一个 有限DFA便可识别出所有需要的内容。
+
+# 4 语法分析——自上而下的分析
+
+
+
+ ## 4.1 语法分析器的功能
+
+对于用户输入的一个字符串，采取从小到大还是从大到小的方式匹配。
+
+## 4.2 自上而下分析面临的问题
+
+### 4.2.1 悬空的else 
+
+语法歧义性：
+
+```c
+if expr then  if expr then state else state
+```
+
+对于这样一个语法分析器，其存在最后一个else语句归属的问题。
+
+```
+stat : 'if' expr 'then' stat
+	| 'if' expr 'then' stat 'else' stat
+	| expr;
+```
+
+antlr4 通过最前优先匹配原则避免了出现语法歧义性。
+
+### 4.2.2 运算符二义性
+
+altr4 默认左结合
+
+```
+<assoc = right> expr ^ expr 
+```
+
+上面的语句要求antlr4 进行右结合
+
+### 4.2.3 消除二义性
+
+这样一个文法是有效且表达清晰的，但是消耗了过多的资源。
+
+```antlr4
+// a left-recursive version
+grammar ExprLR;
+
+@header {
+package expr;
+}
+
+prog : expr EOF ;
+
+//expr : term ('-' term)* ;
+expr : expr '-' term
+     | term
+     ;
+
+// term: factor ('*' factor)* ;
+term : term '*' factor
+     | factor
+     ;
+
+factor : DIGIT ;
+
+DIGIT : [0-9] ;
+WS : [ \t\n\r]+ -> skip ;
+```
+
+Antlr4 采用dfs来遍历语法分析树
